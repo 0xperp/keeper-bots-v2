@@ -3,13 +3,14 @@
  *
  * - [ ] vault
  * - [x] monitoring
- * - [ ] add in full grafana dashboards and datasources from load
+ * - [x] add in full grafana dashboards and datasources from load
  * - [ ] fixed random distribution for choosing bid amount
  * - [ ] ability to re bid a specific auction
  * - [ ] ability to update variables without needing to restart the bot
  * - [ ] ability to hedge on spot market and additional markets
+ * - [ ] On shut down exit all positions and settle upnl
  */
-x;
+
 import {
 	BN,
 	isVariant,
