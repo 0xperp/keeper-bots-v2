@@ -1,3 +1,15 @@
+/**
+ * Improvements
+ *
+ * - [ ] vault
+ * - [x] monitoring
+ * - [ ] add in full grafana dashboards and datasources from load
+ * - [ ] fixed random distribution for choosing bid amount
+ * - [ ] ability to re bid a specific auction
+ * - [ ] ability to update variables without needing to restart the bot
+ * - [ ] ability to hedge on spot market and additional markets
+ */
+x;
 import {
 	BN,
 	isVariant,
@@ -127,22 +139,34 @@ export class JitMakerBot implements Bot {
 		this.metrics = metrics;
 	}
 
+	/**
+	 * Initializes the bot's state.
+	 * - user map
+	 * - user stats map
+	 * - dlob
+	 * - agent state
+	 */
 	public async init() {
-		logger.info(`${this.name} initing`);
+		logger.info(`${this.name} initializing...`);
+
+		// creating an array of promises as part of initialization
 		const initPromises: Array<Promise<any>> = [];
 
+		// creating a map of users in the clearing house
 		this.userMap = new UserMap(
 			this.clearingHouse,
 			this.clearingHouse.userAccountSubscriptionConfig
 		);
 		initPromises.push(this.userMap.fetchAllUsers());
 
+		// creating a map of user stats in the clearing house
 		this.userStatsMap = new UserStatsMap(
 			this.clearingHouse,
 			this.clearingHouse.userAccountSubscriptionConfig
 		);
 		initPromises.push(this.userStatsMap.fetchAllUserStats());
 
+		// creating a new DLOB instance composed of the perp and spot market accounts
 		this.dlob = new DLOB(
 			this.clearingHouse.getPerpMarketAccounts(),
 			this.clearingHouse.getSpotMarketAccounts(),
@@ -152,6 +176,7 @@ export class JitMakerBot implements Bot {
 		);
 		initPromises.push(this.dlob.init());
 
+		// creating a new state object for the perp and spot markets
 		this.agentState = {
 			stateType: new Map<number, StateType>(),
 			spotMarketPosition: new Map<number, SpotPosition>(),
@@ -159,9 +184,14 @@ export class JitMakerBot implements Bot {
 		};
 		initPromises.push(this.updateAgentState());
 
-		await Promise.all(initPromises);
+		// waiting for all initializing promises to resolve
+		await Promise.all(initPromises); // TODO: add in some catching here to handle initialization errors
 	}
 
+	/**
+	 * Resets the bot's state
+	 * - deletes the user map, user stats map, and dlob
+	 */
 	public async reset() {
 		for (const intervalId of this.intervalIds) {
 			clearInterval(intervalId);
@@ -175,6 +205,11 @@ export class JitMakerBot implements Bot {
 		delete this.userStatsMap;
 	}
 
+	/**
+	 * Starts the bot's periodic tasks. The bot will periodically
+	 * call `tryMake` and attempt to fill orders via the JIT auction
+	 * @param intervalMs the interval in milliseconds to call `tryMake`
+	 */
 	public async startIntervalLoop(intervalMs: number) {
 		await this.tryMake();
 		const intervalId = setInterval(this.tryMake.bind(this), intervalMs);
@@ -183,6 +218,10 @@ export class JitMakerBot implements Bot {
 		logger.info(`${this.name} Bot started!`);
 	}
 
+	/**
+	 * A simple health check on the state of the bot
+	 * @returns the bot's current state
+	 */
 	public async healthCheck(): Promise<boolean> {
 		let healthy = false;
 		await this.watchdogTimerMutex.runExclusive(async () => {
@@ -192,6 +231,10 @@ export class JitMakerBot implements Bot {
 		return healthy;
 	}
 
+	/**
+	 * Takes an order or new user record and updates the bot's state
+	 * @param record order or user record to update the bot's state with
+	 */
 	public async trigger(record: any): Promise<void> {
 		if (record.eventType === 'OrderRecord') {
 			await this.userMap.updateWithOrderRecord(record as OrderRecord);
@@ -208,15 +251,23 @@ export class JitMakerBot implements Bot {
 		}
 	}
 
+	/**
+	 * Getter for the DLOB
+	 * @returns the current DLOB
+	 */
 	public viewDlob(): DLOB {
 		return this.dlob;
 	}
 
+	// TODO: understand this function more, why is a random choice being made?
 	/**
 	 * This function creates a distribution of the values in array based on the
 	 * weights array. The returned array should be used in randomIndex to make
 	 * a random draw from the distribution.
-	 *
+	 * @param array the array to create a distribution from
+	 * @param weights the weights to use for the distribution
+	 * @param size the size of the distribution
+	 * @returns the distribution
 	 */
 	private createDistribution(
 		array: Array<any>,
@@ -238,7 +289,7 @@ export class JitMakerBot implements Bot {
 	/**
 	 * Make a random choice from distribution
 	 * @param distribution array of values that can be drawn from
-	 * @returns
+	 * @returns a random value from the distribution
 	 */
 	private randomIndex(distribution: Array<number>): number {
 		const index = Math.floor(distribution.length * Math.random()); // random index
@@ -261,15 +312,42 @@ export class JitMakerBot implements Bot {
 	 * Our goal is to participate in JIT auctions while limiting the delta
 	 * exposure of the bot.
 	 *
-	 * We achieve this by allowing deltas to increase until MAX_POSITION_EXPOSURE
+	 * Initially this was achieved by allowing deltas to increase until MAX_POSITION_EXPOSURE
 	 * is hit, after which orders will only reduce risk until the position is
 	 * closed.
+	 *
+	 * This is a problem because it limits the scalability of the bot.
+	 * Delta exposure can be hedged on an additional exchange or if the
+	 * exposure if + the bot can hedge via the spot market.
+	 *
+	 * // TODO: update the spot market and add it in to hedge the delta positions
 	 *
 	 * @returns {Promise<void>}
 	 */
 	private async updateAgentState(): Promise<void> {
-		// TODO: SPOT
+		// update spot markets
+		for await (const p of this.clearingHouse.getUserAccount().spotPositions) {
+			// if position base amount is zero then we don't have a position
+			if (p.scaledBalance.isZero()) {
+				continue;
+			}
+
+			// update current position based on market position
+			this.agentState.spotMarketPosition.set(p.marketIndex, p);
+
+			// update state
+			let currentState = this.agentState.stateType.get(p.marketIndex);
+			if (!currentState) {
+				this.agentState.stateType.set(p.marketIndex, StateType.NEUTRAL);
+				currentState = StateType.NEUTRAL;
+			}
+
+			// TODO: Hedge the delta position logic
+		}
+
+		// update perp markets
 		for await (const p of this.clearingHouse.getUserAccount().perpPositions) {
+			// if position base amount is zero then we don't have a position
 			if (p.baseAssetAmount.isZero()) {
 				continue;
 			}
@@ -294,6 +372,8 @@ export class JitMakerBot implements Bot {
 				canUpdateStateBasedOnPosition = false;
 			}
 
+			// check if total position is greater than MAX_POSITION_EXPOSURE
+			// TODO: keep this, but expand it out to first logging delta exposure and second hedging it
 			if (canUpdateStateBasedOnPosition) {
 				// check if need to enter a closing state
 				const accountCollateral = convertToNumber(
@@ -333,13 +413,21 @@ export class JitMakerBot implements Bot {
 		}
 	}
 
+	/**
+	 * Determines if an order in the DLOB (node in the tree) can be filled
+	 *
+	 * @param node an order in the DLOB tree
+	 * @param userAccountPublicKey public key of the user account
+	 * @returns if the node can be filled
+	 */
 	private nodeCanBeFilled(
 		node: DLOBNode,
 		userAccountPublicKey: PublicKey
 	): boolean {
+		// check if the order has already been filled/made
 		if (node.haveFilled) {
 			logger.error(
-				`already made the JIT auction for ${node.userAccount} - ${node.order.orderId}`
+				`order has already made the JIT auction for ${node.userAccount} OrderID: ${node.order.orderId}`
 			);
 			return false;
 		}
@@ -349,40 +437,63 @@ export class JitMakerBot implements Bot {
 			return false;
 		}
 
+		// get the order signature from the node
 		const orderSignature = getOrderSignature(
 			node.order.orderId,
 			node.userAccount
 		);
+
+		// get the last seen base amount given an order signature
+		// if orderLastSeenBaseAmount can be trimmed down this should be faster
 		const lastBaseAmountFilledSeen =
 			this.orderLastSeenBaseAmount.get(orderSignature);
+
+		// if last seen amount is the same as the current amount then we have already filled this order
 		if (lastBaseAmountFilledSeen?.eq(node.order.baseAssetAmountFilled)) {
 			return false;
 		}
 
+		// return that the order is ready and able to be filled
 		return true;
 	}
 
 	/**
+	 * Determine the base amount to fill for a given order
 	 *
+	 * @param orderBaseAmountAvailable the base amount available to fill
+	 * @param orderPrice the price of the order
+	 * @returns the base amount to fill as a BN
 	 */
 	private determineJitAuctionBaseFillAmount(
 		orderBaseAmountAvailable: BN,
 		orderPrice: BN
 	): BN {
+		// convert the order base amount available to a number with the correct precision
+		// TODO: what is this precision?
 		const priceNumber = convertToNumber(orderPrice, PRICE_PRECISION);
+
+		// determine the worst case scenario for the base amount to fill
+		// defined as the amount * orderPrice
 		const worstCaseQuoteSpend = orderBaseAmountAvailable
 			.mul(orderPrice)
 			.div(BASE_PRECISION.mul(PRICE_PRECISION))
 			.mul(QUOTE_PRECISION);
 
+		// defining the minimum order quote
+		// TODO: this should be configurable
 		const minOrderQuote = 20;
 		let orderQuote = minOrderQuote;
+		// max quote is defined as the worst order possible
 		let maxOrderQuote = convertToNumber(worstCaseQuoteSpend, QUOTE_PRECISION);
 
+		// checking if the max quote exceeds the max trading size defined above
 		if (maxOrderQuote > this.MAX_TRADE_SIZE_QUOTE) {
 			maxOrderQuote = this.MAX_TRADE_SIZE_QUOTE;
 		}
 
+		// if max if greater than the minimum quote that would be offered
+		// define the quote as a random number between the min and max
+		// TODO: CHANGE THIS!
 		if (maxOrderQuote >= minOrderQuote) {
 			orderQuote = this.randomIntFromInterval(minOrderQuote, maxOrderQuote);
 		}
@@ -394,6 +505,13 @@ export class JitMakerBot implements Bot {
 		if (baseFillAmountBN.gt(orderBaseAmountAvailable)) {
 			baseFillAmountBN = orderBaseAmountAvailable;
 		}
+
+		logger.info!(
+			`Oracle Price / Worst Quote: ${maxOrderQuote}\n
+			Best Quote: ${orderQuote}\n
+			Order Size: ${orderBaseAmountAvailable}`
+		);
+
 		logger.info(
 			`jitMaker will fill base amount: ${convertToNumber(
 				baseFillAmountBN,
@@ -408,8 +526,10 @@ export class JitMakerBot implements Bot {
 	}
 
 	/**
-	 * Draws an action based on the current state of the bot.
+	 * Determines all markets that can be filled, their pricing
+	 * and then trys to fill then
 	 *
+	 * @param market the market to get the perp orderbook for
 	 */
 	private async drawAndExecuteAction(market: PerpMarketAccount) {
 		// get nodes available to fill in the jit auction
@@ -419,7 +539,9 @@ export class JitMakerBot implements Bot {
 			MarketType.PERP
 		);
 
+		// iterate over each node, determine if it can be filled, and fill it
 		for (const nodeToFill of nodesToFill) {
+			// check if the node can be filled
 			if (
 				!this.nodeCanBeFilled(
 					nodeToFill.node,
@@ -432,8 +554,9 @@ export class JitMakerBot implements Bot {
 			logger.info(
 				`node slot: ${
 					nodeToFill.node.order.slot
-				}, cur slot: ${this.slotSubscriber.getSlot()}`
+				}, current slot: ${this.slotSubscriber.getSlot()}`
 			);
+
 			this.orderLastSeenBaseAmount.set(
 				getOrderSignature(
 					nodeToFill.node.order.orderId,
@@ -461,8 +584,12 @@ export class JitMakerBot implements Bot {
 				? PositionDirection.SHORT
 				: PositionDirection.LONG;
 
+			// determine the auction starting price
+			// this defaults to the oracle price
+			// https://docs.drift.trade/just-in-time-jit-auctions#INgHr
 			const jitMakerPrice = nodeToFill.node.order.auctionStartPrice;
 
+			// determine the base amount to fill and the quote amount given the starting price
 			const jitMakerBaseAssetAmount = this.determineJitAuctionBaseFillAmount(
 				nodeToFill.node.order.baseAssetAmount.sub(
 					nodeToFill.node.order.baseAssetAmountFilled
@@ -490,8 +617,10 @@ export class JitMakerBot implements Bot {
 				} slots since order, auction ends in ${aucEnd - currSlot} slots`
 			);
 
+			// try to execute the transaction to fill the order
+			// TODO: separate this into a function that can be called separate so that we can retry specific orders
 			try {
-				const txSig = await this.executeAction({
+				const txSig = await this.executePerpOrder({
 					baseAssetAmount: jitMakerBaseAssetAmount,
 					marketIndex: nodeToFill.node.order.marketIndex,
 					direction: jitMakerDirection,
@@ -499,22 +628,39 @@ export class JitMakerBot implements Bot {
 					node: nodeToFill.node,
 				});
 
+				// record the order being filled into the prometheus metrics
 				this.metrics?.recordFilledOrder(
 					this.clearingHouse.provider.wallet.publicKey,
 					this.name
 				);
+
 				logger.info(
 					`${
 						this.name
 					}: JIT auction filled (account: ${nodeToFill.node.userAccount.toString()} - ${nodeToFill.node.order.orderId.toString()}), Tx: ${txSig}`
 				);
+
 				return txSig;
 			} catch (error) {
+				// If we get an error that order does not exist, assume its been filled by somebody else and we
+				// have not received the history record yet
+				// but given events could have arrived out of order, we need to check the orderbook to see if the order is still there
+				// let orderStatus = this.nodeCanBeFilled(
+				// 	nodeToFill.node,
+				// 	nodeToFill.node.userAccount
+				// );
+
+				// orderStatus is true if the order is still in the orderbook
+				// and is still able to be filled, otherwise it has already
+				// been filled or does not exist
+				// if (orderStatus) {
+				// 	this.executeOrder();
+				// }
+
+				// node was not able to be filled due to a transaction error
 				nodeToFill.node.haveFilled = false;
 
-				// If we get an error that order does not exist, assume its been filled by somebody else and we
-				// have received the history record yet
-				// TODO this might not hold if events arrive out of order
+				// record error event
 				const errorCode = getErrorCode(error);
 				this.metrics?.recordErrorCode(
 					errorCode,
@@ -525,29 +671,22 @@ export class JitMakerBot implements Bot {
 				logger.error(
 					`Error (${errorCode}) filling JIT auction (account: ${nodeToFill.node.userAccount.toString()} - ${nodeToFill.node.order.orderId.toString()})`
 				);
-
-				/* todo remove this, fix error handling
-				if (errorCode === 6042) {
-					this.dlob.remove(
-						nodeToFill.node.order,
-						nodeToFill.node.userAccount,
-						() => {
-							logger.error(
-								`Order ${nodeToFill.node.order.orderId.toString()} not found when trying to fill. Removing from order list`
-							);
-						}
-					);
-				}
-				*/
-
-				// console.error(error);
 			}
 		}
 	}
 
-	private async executeAction(action: Action): Promise<TransactionSignature> {
+	/**
+	 * Execute and place a `PerpOrder`
+	 *
+	 * @param action order to place and execute
+	 * @returns a promise that resolves to the transaction signature
+	 */
+	private async executePerpOrder(
+		action: Action
+	): Promise<TransactionSignature> {
 		const currentState = this.agentState.stateType.get(action.marketIndex);
 
+		// checking if the action should be skipped due to the current state
 		if (this.RESTRICT_POSITION_SIZE) {
 			if (
 				currentState === StateType.CLOSING_LONG &&
@@ -600,11 +739,21 @@ export class JitMakerBot implements Bot {
 		);
 	}
 
+	/**
+	 * Given a perp market, update its state and begin to fill orders
+	 *
+	 * @param market perp market account to fill with
+	 */
 	private async tryMakeJitAuctionForMarket(market: PerpMarketAccount) {
 		await this.updateAgentState();
 		await this.drawAndExecuteAction(market);
 	}
 
+	/**
+	 * Make/Fill JIT Auctions
+	 * - update all markets
+	 * - begin to check, price, and fill oracles for each *perp* market
+	 */
 	private async tryMake() {
 		const start = Date.now();
 		let ran = false;
@@ -615,6 +764,8 @@ export class JitMakerBot implements Bot {
 						this.dlob.clear();
 						delete this.dlob;
 					}
+
+					// creating a new DLOB instance and updating its state
 					this.dlob = new DLOB(
 						this.clearingHouse.getPerpMarketAccounts(),
 						this.clearingHouse.getSpotMarketAccounts(),
@@ -625,8 +776,8 @@ export class JitMakerBot implements Bot {
 					await this.dlob.init();
 				});
 
+				// make the JIT auction
 				await Promise.all(
-					// TODO: spot
 					this.clearingHouse.getPerpMarketAccounts().map((marketAccount) => {
 						this.tryMakeJitAuctionForMarket(marketAccount);
 					})
