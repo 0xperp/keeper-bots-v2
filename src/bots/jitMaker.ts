@@ -527,6 +527,54 @@ export class JitMakerBot implements Bot {
 		return baseFillAmountBN;
 	}
 
+	private async fillOrder(
+		jitMakerBaseAssetAmount,
+		nodeToFill,
+		jitMakerDirection,
+		jitMakerPrice,
+		marketSymbol,
+		auctionEndPrice
+	) {
+		const txSig = await this.executePerpOrder({
+			baseAssetAmount: jitMakerBaseAssetAmount,
+			marketIndex: nodeToFill.node.order.marketIndex,
+			direction: jitMakerDirection,
+			price: jitMakerPrice,
+			node: nodeToFill.node,
+		});
+
+		// record the order being filled into the prometheus metrics
+		this.metrics?.recordFilledOrder(
+			this.clearingHouse.provider.wallet.publicKey,
+			this.name
+		);
+
+		// TODO: right now the maker bot is quoting right at the start of the auction, quote better to make more
+		logger.info(
+			`${marketSymbol} ${JSON.stringify(jitMakerDirection)} ${convertToNumber(
+				jitMakerBaseAssetAmount,
+				BASE_PRECISION
+			).toString()} at a price of ${convertToNumber(
+				jitMakerPrice,
+				PRICE_PRECISION
+			).toFixed(4)} (auction start:end ${convertToNumber(
+				jitMakerPrice,
+				PRICE_PRECISION
+			).toFixed(4)} - ${convertToNumber(
+				auctionEndPrice,
+				PRICE_PRECISION
+			).toFixed(4)})`
+		);
+
+		logger.info(
+			`${
+				this.name
+			}: JIT auction filled (account: ${nodeToFill.node.userAccount.toString()} - ${nodeToFill.node.order.orderId.toString()}), Tx: ${txSig}`
+		);
+
+		return txSig;
+	}
+
 	/**
 	 * Determines all markets that can be filled, their pricing
 	 * and then trys to fill then
@@ -624,44 +672,14 @@ export class JitMakerBot implements Bot {
 
 			// try to execute the transaction to fill the order
 			try {
-				const txSig = await this.executePerpOrder({
-					baseAssetAmount: jitMakerBaseAssetAmount,
-					marketIndex: nodeToFill.node.order.marketIndex,
-					direction: jitMakerDirection,
-					price: jitMakerPrice,
-					node: nodeToFill.node,
-				});
-
-				// record the order being filled into the prometheus metrics
-				this.metrics?.recordFilledOrder(
-					this.clearingHouse.provider.wallet.publicKey,
-					this.name
+				const txSig = await this.fillOrder(
+					jitMakerBaseAssetAmount,
+					nodeToFill,
+					jitMakerDirection,
+					jitMakerPrice,
+					marketSymbol,
+					auctionEndPrice
 				);
-
-				logger.info(
-					`${marketSymbol} ${JSON.stringify(
-						jitMakerDirection
-					)} ${convertToNumber(
-						jitMakerBaseAssetAmount,
-						BASE_PRECISION
-					).toString()} at a price of ${convertToNumber(
-						jitMakerPrice,
-						PRICE_PRECISION
-					).toFixed(4)} (auction start:end ${convertToNumber(
-						jitMakerPrice,
-						PRICE_PRECISION
-					).toFixed(4)} - ${convertToNumber(
-						auctionEndPrice,
-						PRICE_PRECISION
-					).toFixed(4)})`
-				);
-
-				logger.info(
-					`${
-						this.name
-					}: JIT auction filled (account: ${nodeToFill.node.userAccount.toString()} - ${nodeToFill.node.order.orderId.toString()}), Tx: ${txSig}`
-				);
-
 				return txSig;
 			} catch (error) {
 				// If we get an error that order does not exist, assume its been filled by somebody else and we
@@ -678,28 +696,15 @@ export class JitMakerBot implements Bot {
 				// and is still able to be filled, otherwise it has already
 				// been filled or does not exist
 				if (orderStatus) {
-					const txSig = this.executePerpOrder({
-						baseAssetAmount: jitMakerBaseAssetAmount,
-						marketIndex: nodeToFill.node.order.marketIndex,
-						direction: jitMakerDirection,
-						price: jitMakerPrice,
-						node: nodeToFill.node,
-					});
-
-					logger.info(`Executed order again ${txSig}`);
-
-					// record the order being filled into the prometheus metrics
-					this.metrics?.recordFilledOrder(
-						this.clearingHouse.provider.wallet.publicKey,
-						this.name
+					logger.info(`Re-executing Order`);
+					const txSig = await this.fillOrder(
+						jitMakerBaseAssetAmount,
+						nodeToFill,
+						jitMakerDirection,
+						jitMakerPrice,
+						marketSymbol,
+						auctionEndPrice
 					);
-
-					logger.info(
-						`${
-							this.name
-						}: JIT auction filled (account: ${nodeToFill.node.userAccount.toString()} - ${nodeToFill.node.order.orderId.toString()}), Tx: ${txSig}`
-					);
-
 					return txSig;
 				}
 
