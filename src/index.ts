@@ -70,7 +70,7 @@ program
 	.option('--liquidator', 'Enable liquidator bot')
 	.option('--pnl-settler', 'Enable PnL settler bot')
 	.option('--cancel-open-orders', 'Cancel open orders on startup')
-	.option('--close-open-positions', 'close all open positions')
+	.option('--close-open-positions', 'Close all open positions')
 	.option('--test-liveness', 'Purposefully fail liveness test after 1 minute')
 	.option(
 		'--force-deposit <number>',
