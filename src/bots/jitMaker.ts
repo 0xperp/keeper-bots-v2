@@ -803,7 +803,7 @@ export class JitMakerBot implements Bot {
 	private async executeSpotOrder(
 		action: Action
 	): Promise<TransactionSignature> {
-		const currentState = this.agentState.stateType.get(action.marketIndex);
+		// const currentState = this.agentState.stateType.get(action.marketIndex);
 
 		// TODO: might need to add in some check for user account and spot
 
