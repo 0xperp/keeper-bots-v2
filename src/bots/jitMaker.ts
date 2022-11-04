@@ -4,10 +4,8 @@
  * - [ ] vault
  * - [x] monitoring
  * - [x] add in full grafana dashboards and datasources from load
- * - [ ] fixed random distribution for choosing bid amount
- * - [ ] ability to re bid a specific auction
+ * - [x] ability to re bid a specific auction
  * - [ ] ability to hedge on spot market and additional markets
- * - [ ] implement basic API for changing variables with a POST or telling the bot to settle position
  */
 
 import {
@@ -36,12 +34,13 @@ import {
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
 
-import { TransactionSignature, PublicKey } from '@solana/web3.js';
+import { TransactionSignature, PublicKey, Connection } from '@solana/web3.js';
 
 import { getErrorCode } from '../error';
 import { logger } from '../logger';
 import { Bot } from '../types';
 import { Metrics } from '../metrics';
+import { PythHttpClient, PriceStatus, getPythProgramKeyForCluster } from '@pythnetwork/client';
 
 type Action = {
 	baseAssetAmount: BN;
@@ -549,7 +548,6 @@ export class JitMakerBot implements Bot {
 			this.name
 		);
 
-		// TODO: right now the maker bot is quoting right at the start of the auction, quote better to make more
 		logger.info(
 			`${marketSymbol} ${JSON.stringify(jitMakerDirection)} ${convertToNumber(
 				jitMakerBaseAssetAmount,
@@ -669,6 +667,32 @@ export class JitMakerBot implements Bot {
 					currSlot - orderSlot
 				} slots since order, auction ends in ${aucEnd - currSlot} slots`
 			);
+
+			// Check Pyth Oracle for asset to determine best pricing 
+			const pythClient = new PythHttpClient(new Connection(this.clearingHouse.connection.rpcEndpoint), getPythProgramKeyForCluster('devnet'));
+			const data = await pythClient.getData();	
+			const price = data.productPrice.get(marketSymbol)!;
+			
+			// Ex. Crypto.SRM/USD: $8.68725 ±$0.0131 Status: Trading
+			logger.info(`${marketSymbol}: $${price.price} \xB1$${price.confidence} Status: ${PriceStatus[price.status]}`)
+
+			// Auctions run like this 
+			// Long
+			// - Auction starts at the oracle price
+			// - Auction ends at the AMM asking price
+			//
+			// Short
+			// - Auction starts at the oracle price 
+			// - Auction ends at the AMM bid price
+			//
+			// Right now this bot bids direct at this oracle price, 
+			// check the oracle direct and quote in between the start and the end price
+			// closer to the AMM price the more $ is made but also makes it less likely to win an auction
+
+			// check if oracle price status is down
+			if (Number(PriceStatus[price.status]) != 1) {
+				break;
+			}
 
 			// try to execute the transaction to fill the order
 			try {
