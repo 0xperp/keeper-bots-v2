@@ -40,7 +40,11 @@ import { getErrorCode } from '../error';
 import { logger } from '../logger';
 import { Bot } from '../types';
 import { Metrics } from '../metrics';
-import { PythHttpClient, PriceStatus, getPythProgramKeyForCluster } from '@pythnetwork/client';
+import {
+	PythHttpClient,
+	PriceStatus,
+	getPythProgramKeyForCluster,
+} from '@pythnetwork/client';
 
 type Action = {
 	baseAssetAmount: BN;
@@ -412,6 +416,8 @@ export class JitMakerBot implements Bot {
 				}
 			}
 		}
+		// given deltas on each market iterate and use spot markets to hedge
+		// TODO: hedge
 	}
 
 	/**
@@ -526,19 +532,42 @@ export class JitMakerBot implements Bot {
 		return baseFillAmountBN;
 	}
 
-	private async fillOrder(
-		jitMakerBaseAssetAmount,
+	private async fillSpotOrder(baseAssetAmount, direction, price, node) {
+		const txSig = await this.executeSpotOrder({
+			baseAssetAmount: baseAssetAmount,
+			marketIndex: node.order.marketIndex,
+			direction: direction,
+			price: price,
+			node: node,
+		});
+
+		// TODO: add to metrics
+		// record the order being filled into the prometheus metrics
+		// this.metrics?.recordFilledOrder(
+		// 	this.clearingHouse.provider.wallet.publicKey,
+		// 	this.name
+		// );
+
+		logger.info(
+			`Executed spot order for market ${node.order.marketIndex} ${baseAssetAmount} `
+		);
+
+		return txSig;
+	}
+
+	private async fillPerpOrder(
+		baseAssetAmount,
 		nodeToFill,
-		jitMakerDirection,
-		jitMakerPrice,
+		direction,
+		makerPrice,
 		marketSymbol,
 		auctionEndPrice
 	) {
 		const txSig = await this.executePerpOrder({
-			baseAssetAmount: jitMakerBaseAssetAmount,
+			baseAssetAmount: baseAssetAmount,
 			marketIndex: nodeToFill.node.order.marketIndex,
-			direction: jitMakerDirection,
-			price: jitMakerPrice,
+			direction: direction,
+			price: makerPrice,
 			node: nodeToFill.node,
 		});
 
@@ -549,14 +578,14 @@ export class JitMakerBot implements Bot {
 		);
 
 		logger.info(
-			`${marketSymbol} ${JSON.stringify(jitMakerDirection)} ${convertToNumber(
-				jitMakerBaseAssetAmount,
+			`${marketSymbol} ${JSON.stringify(direction)} ${convertToNumber(
+				baseAssetAmount,
 				BASE_PRECISION
 			).toString()} at a price of ${convertToNumber(
-				jitMakerPrice,
+				makerPrice,
 				PRICE_PRECISION
 			).toFixed(4)} (auction start:end ${convertToNumber(
-				jitMakerPrice,
+				makerPrice,
 				PRICE_PRECISION
 			).toFixed(4)} - ${convertToNumber(
 				auctionEndPrice,
@@ -585,6 +614,14 @@ export class JitMakerBot implements Bot {
 			market.marketIndex,
 			this.slotSubscriber.getSlot(),
 			MarketType.PERP
+		);
+
+		logger.error(
+			`Market Index ${
+				market.marketIndex
+			}, Slot ${this.slotSubscriber.getSlot()}, Nodes to fill ${
+				nodesToFill.length
+			}`
 		);
 
 		// iterate over each node, determine if it can be filled, and fill it
@@ -668,24 +705,31 @@ export class JitMakerBot implements Bot {
 				} slots since order, auction ends in ${aucEnd - currSlot} slots`
 			);
 
-			// Check Pyth Oracle for asset to determine best pricing 
-			const pythClient = new PythHttpClient(new Connection(this.clearingHouse.connection.rpcEndpoint), getPythProgramKeyForCluster('devnet'));
-			const data = await pythClient.getData();	
+			// Check Pyth Oracle for asset to determine best pricing
+			const pythClient = new PythHttpClient(
+				new Connection(this.clearingHouse.connection.rpcEndpoint),
+				getPythProgramKeyForCluster('devnet')
+			);
+			const data = await pythClient.getData();
 			const price = data.productPrice.get(marketSymbol)!;
-			
-			// Ex. Crypto.SRM/USD: $8.68725 ±$0.0131 Status: Trading
-			logger.info(`${marketSymbol}: $${price.price} \xB1$${price.confidence} Status: ${PriceStatus[price.status]}`)
 
-			// Auctions run like this 
+			// Ex. Crypto.SRM/USD: $8.68725 ±$0.0131 Status: Trading
+			logger.info(
+				`${marketSymbol}: $${price.price} \xB1$${price.confidence} Status: ${
+					PriceStatus[price.status]
+				}`
+			);
+
+			// Auctions run like this
 			// Long
 			// - Auction starts at the oracle price
 			// - Auction ends at the AMM asking price
 			//
 			// Short
-			// - Auction starts at the oracle price 
+			// - Auction starts at the oracle price
 			// - Auction ends at the AMM bid price
 			//
-			// Right now this bot bids direct at this oracle price, 
+			// Right now this bot bids direct at this oracle price,
 			// check the oracle direct and quote in between the start and the end price
 			// closer to the AMM price the more $ is made but also makes it less likely to win an auction
 
@@ -696,7 +740,7 @@ export class JitMakerBot implements Bot {
 
 			// try to execute the transaction to fill the order
 			try {
-				const txSig = await this.fillOrder(
+				const txSig = await this.fillPerpOrder(
 					jitMakerBaseAssetAmount,
 					nodeToFill,
 					jitMakerDirection,
@@ -721,7 +765,7 @@ export class JitMakerBot implements Bot {
 				// been filled or does not exist
 				if (orderStatus) {
 					logger.info(`Re-executing Order`);
-					const txSig = await this.fillOrder(
+					const txSig = await this.fillPerpOrder(
 						jitMakerBaseAssetAmount,
 						nodeToFill,
 						jitMakerDirection,
@@ -748,6 +792,48 @@ export class JitMakerBot implements Bot {
 				);
 			}
 		}
+	}
+
+	/**
+	 * Execute and place a `SpotOrder`
+	 *
+	 * @param action order to place and execute
+	 * @returns a promise that resolves to the transaction signature
+	 */
+	private async executeSpotOrder(
+		action: Action
+	): Promise<TransactionSignature> {
+		const currentState = this.agentState.stateType.get(action.marketIndex);
+
+		// TODO: might need to add in some check for user account and spot
+
+		const takerUserAccount = (
+			await this.userMap.mustGet(action.node.userAccount.toString())
+		).getUserAccount();
+		const takerAuthority = takerUserAccount.authority;
+
+		const takerUserStats = await this.userStatsMap.mustGet(
+			takerAuthority.toString()
+		);
+		const takerUserStatsPublicKey = takerUserStats.userStatsAccountPublicKey;
+
+		return await this.clearingHouse.placeAndMakeSpotOrder(
+			{
+				orderType: OrderType.LIMIT,
+				marketIndex: action.marketIndex,
+				baseAssetAmount: action.baseAssetAmount,
+				direction: action.direction,
+				price: action.price,
+				postOnly: true,
+				immediateOrCancel: true,
+			},
+			{
+				taker: action.node.userAccount,
+				order: action.node.order,
+				takerStats: takerUserStatsPublicKey,
+				takerUserAccount: takerUserAccount,
+			}
+		);
 	}
 
 	/**

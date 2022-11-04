@@ -77,6 +77,10 @@ program
 		'Force deposit this amount of USDC to collateral account, the program will end after the deposit transaction is sent'
 	)
 	.option('--metrics <number>', 'Enable Prometheus metric scraper')
+	.option(
+		'--vault <bool>',
+		'Load private key from vault in the `secret` mount with the key `pk`'
+	)
 	.addOption(
 		new Option(
 			'-p, --private-key <string>',
@@ -97,13 +101,27 @@ JitMakerBot enabled: ${!!opts.jitMaker},\n\
 PnlSettler enabled: ${!!opts.pnlSettler},\n\
 `);
 
-export function getWallet(): Wallet {
-	const privateKey = process.env.KEEPER_PRIVATE_KEY;
+export async function getWallet(): Promise<Wallet> {
+	let privateKey;
+	if (opts.vault) {
+		await fetch('http://127.0.0.1:8200/v1/secret/data/pk', {
+			method: 'GET',
+			headers: {
+				'X-Vault-Token': process.env.VAULT_TOKEN,
+			},
+		})
+			.then((response) => response.json())
+			.then((response) => (privateKey = response.data.data.pk));
+	} else {
+		privateKey = process.env.KEEPER_PRIVATE_KEY;
+	}
+
 	if (!privateKey) {
 		throw new Error(
-			'Must set environment variable KEEPER_PRIVATE_KEY with the path to a id.json or a list of commma separated numbers'
+			'Must set environment variable KEEPER_PRIVATE_KEY with the path to a id.json or a list of commma separated numbers or load via vault and use the --vault flag'
 		);
 	}
+
 	// try to load privateKey as a filepath
 	let loadedKey: Uint8Array;
 	if (fs.existsSync(privateKey)) {
@@ -222,10 +240,8 @@ function printOpenPositions(clearingHouseUser: User) {
 
 const bots: Bot[] = [];
 const runBot = async () => {
-	const wallet = getWallet();
-	const clearingHousePublicKey = new PublicKey(
-		sdkConfig.DRIFT_PROGRAM_ID
-	);
+	const wallet = await getWallet();
+	const clearingHousePublicKey = new PublicKey(sdkConfig.DRIFT_PROGRAM_ID);
 
 	const connection = new Connection(endpoint, stateCommitment);
 
