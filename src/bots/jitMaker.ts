@@ -3,13 +3,13 @@
  *
  * - [ ] vault
  * - [x] monitoring
- * - [ ] add in full grafana dashboards and datasources from load
+ * - [x] add in full grafana dashboards and datasources from load
  * - [ ] fixed random distribution for choosing bid amount
  * - [ ] ability to re bid a specific auction
- * - [ ] ability to update variables without needing to restart the bot
  * - [ ] ability to hedge on spot market and additional markets
+ * - [ ] implement basic API for changing variables with a POST or telling the bot to settle position
  */
-x;
+
 import {
 	BN,
 	isVariant,
@@ -32,6 +32,7 @@ import {
 	UserStatsMap,
 	getOrderSignature,
 	MarketType,
+	configs,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -386,6 +387,7 @@ export class JitMakerBot implements Bot {
 				);
 				const exposure = positionValue / accountCollateral;
 
+				// check if the exposure to an asset is over the max exposure
 				if (exposure >= this.MAX_POSITION_EXPOSURE) {
 					// state becomes closing only
 					if (p.baseAssetAmount.gt(new BN(0))) {
@@ -461,7 +463,7 @@ export class JitMakerBot implements Bot {
 	 * Determine the base amount to fill for a given order
 	 *
 	 * @param orderBaseAmountAvailable the base amount available to fill
-	 * @param orderPrice the price of the order
+	 * @param orderPrice the price of the order from the aucton start price
 	 * @returns the base amount to fill as a BN
 	 */
 	private determineJitAuctionBaseFillAmount(
@@ -507,9 +509,9 @@ export class JitMakerBot implements Bot {
 		}
 
 		logger.info!(
-			`Oracle Price / Worst Quote: ${maxOrderQuote}\n
+			`Worst Quote: ${maxOrderQuote}\n
 			Best Quote: ${orderQuote}\n
-			Order Size: ${orderBaseAmountAvailable}`
+			Auction Start Price: ${orderPrice}`
 		);
 
 		logger.info(
@@ -519,10 +521,58 @@ export class JitMakerBot implements Bot {
 			).toString()} of remaining order ${convertToNumber(
 				orderBaseAmountAvailable,
 				BASE_PRECISION
-			)}.`
+			)} at a price of .`
 		);
 
 		return baseFillAmountBN;
+	}
+
+	private async fillOrder(
+		jitMakerBaseAssetAmount,
+		nodeToFill,
+		jitMakerDirection,
+		jitMakerPrice,
+		marketSymbol,
+		auctionEndPrice
+	) {
+		const txSig = await this.executePerpOrder({
+			baseAssetAmount: jitMakerBaseAssetAmount,
+			marketIndex: nodeToFill.node.order.marketIndex,
+			direction: jitMakerDirection,
+			price: jitMakerPrice,
+			node: nodeToFill.node,
+		});
+
+		// record the order being filled into the prometheus metrics
+		this.metrics?.recordFilledOrder(
+			this.clearingHouse.provider.wallet.publicKey,
+			this.name
+		);
+
+		// TODO: right now the maker bot is quoting right at the start of the auction, quote better to make more
+		logger.info(
+			`${marketSymbol} ${JSON.stringify(jitMakerDirection)} ${convertToNumber(
+				jitMakerBaseAssetAmount,
+				BASE_PRECISION
+			).toString()} at a price of ${convertToNumber(
+				jitMakerPrice,
+				PRICE_PRECISION
+			).toFixed(4)} (auction start:end ${convertToNumber(
+				jitMakerPrice,
+				PRICE_PRECISION
+			).toFixed(4)} - ${convertToNumber(
+				auctionEndPrice,
+				PRICE_PRECISION
+			).toFixed(4)})`
+		);
+
+		logger.info(
+			`${
+				this.name
+			}: JIT auction filled (account: ${nodeToFill.node.userAccount.toString()} - ${nodeToFill.node.order.orderId.toString()}), Tx: ${txSig}`
+		);
+
+		return txSig;
 	}
 
 	/**
@@ -579,6 +629,8 @@ export class JitMakerBot implements Bot {
 
 			// calculate jit maker order params
 			const orderMarketIdx = nodeToFill.node.market.marketIndex;
+			// get market symbol from constants
+			const marketSymbol = configs.devnet.PERP_MARKETS[orderMarketIdx].symbol;
 			const orderDirection = nodeToFill.node.order.direction;
 			const jitMakerDirection = isVariant(orderDirection, 'long')
 				? PositionDirection.SHORT
@@ -588,6 +640,7 @@ export class JitMakerBot implements Bot {
 			// this defaults to the oracle price
 			// https://docs.drift.trade/just-in-time-jit-auctions#INgHr
 			const jitMakerPrice = nodeToFill.node.order.auctionStartPrice;
+			const auctionEndPrice = nodeToFill.node.order.auctionEndPrice;
 
 			// determine the base amount to fill and the quote amount given the starting price
 			const jitMakerBaseAssetAmount = this.determineJitAuctionBaseFillAmount(
@@ -605,11 +658,11 @@ export class JitMakerBot implements Bot {
 			logger.info(
 				`${
 					this.name
-				} propose to fill jit auction on market ${orderMarketIdx}: ${JSON.stringify(
+				} propose to fill jit auction on market ${marketSymbol}: ${JSON.stringify(
 					jitMakerDirection
 				)}: ${convertToNumber(jitMakerBaseAssetAmount, BASE_PRECISION).toFixed(
 					4
-				)}, limit price: ${convertToNumber(
+				)}, limit order price: ${convertToNumber(
 					jitMakerPrice,
 					PRICE_PRECISION
 				).toFixed(4)}, it has been ${
@@ -618,44 +671,42 @@ export class JitMakerBot implements Bot {
 			);
 
 			// try to execute the transaction to fill the order
-			// TODO: separate this into a function that can be called separate so that we can retry specific orders
 			try {
-				const txSig = await this.executePerpOrder({
-					baseAssetAmount: jitMakerBaseAssetAmount,
-					marketIndex: nodeToFill.node.order.marketIndex,
-					direction: jitMakerDirection,
-					price: jitMakerPrice,
-					node: nodeToFill.node,
-				});
-
-				// record the order being filled into the prometheus metrics
-				this.metrics?.recordFilledOrder(
-					this.clearingHouse.provider.wallet.publicKey,
-					this.name
+				const txSig = await this.fillOrder(
+					jitMakerBaseAssetAmount,
+					nodeToFill,
+					jitMakerDirection,
+					jitMakerPrice,
+					marketSymbol,
+					auctionEndPrice
 				);
-
-				logger.info(
-					`${
-						this.name
-					}: JIT auction filled (account: ${nodeToFill.node.userAccount.toString()} - ${nodeToFill.node.order.orderId.toString()}), Tx: ${txSig}`
-				);
-
 				return txSig;
 			} catch (error) {
 				// If we get an error that order does not exist, assume its been filled by somebody else and we
 				// have not received the history record yet
 				// but given events could have arrived out of order, we need to check the orderbook to see if the order is still there
-				// let orderStatus = this.nodeCanBeFilled(
-				// 	nodeToFill.node,
-				// 	nodeToFill.node.userAccount
-				// );
+				const orderStatus = this.nodeCanBeFilled(
+					nodeToFill.node,
+					nodeToFill.node.userAccount
+				);
+
+				logger.info(`Order failed but OrderStatus=${orderStatus}`);
 
 				// orderStatus is true if the order is still in the orderbook
 				// and is still able to be filled, otherwise it has already
 				// been filled or does not exist
-				// if (orderStatus) {
-				// 	this.executeOrder();
-				// }
+				if (orderStatus) {
+					logger.info(`Re-executing Order`);
+					const txSig = await this.fillOrder(
+						jitMakerBaseAssetAmount,
+						nodeToFill,
+						jitMakerDirection,
+						jitMakerPrice,
+						marketSymbol,
+						auctionEndPrice
+					);
+					return txSig;
+				}
 
 				// node was not able to be filled due to a transaction error
 				nodeToFill.node.haveFilled = false;
@@ -745,8 +796,8 @@ export class JitMakerBot implements Bot {
 	 * @param market perp market account to fill with
 	 */
 	private async tryMakeJitAuctionForMarket(market: PerpMarketAccount) {
-		await this.updateAgentState();
-		await this.drawAndExecuteAction(market);
+		await this.updateAgentState(); // updates state based on the market and user preferences
+		await this.drawAndExecuteAction(market); // takes a perp market, determines the price for the auction and executes it
 	}
 
 	/**
