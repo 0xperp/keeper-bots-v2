@@ -2,9 +2,9 @@ import {
 	DriftEnv,
 	NewUserRecord,
 	OrderRecord,
-	User,
+	ClearingHouseUser,
 	ReferrerInfo,
-	DriftClient,
+	ClearingHouse,
 	SpotMarketAccount,
 	SlotSubscriber,
 	MakerInfo,
@@ -16,7 +16,7 @@ import {
 	MarketType,
 	initialize,
 	SerumSubscriber,
-	PollingDriftClientAccountSubscriber,
+	PollingClearingHouseAccountSubscriber,
 	SerumFulfillmentConfigMap,
 	promiseTimeout,
 	SerumV3FulfillmentConfigAccount,
@@ -47,7 +47,7 @@ export class SpotFillerBot implements Bot {
 	public readonly defaultIntervalMs: number = 1000;
 
 	private driftEnv: DriftEnv;
-	private clearingHouse: DriftClient;
+	private clearingHouse: ClearingHouse;
 	private slotSubscriber: SlotSubscriber;
 
 	private dlobMutex = withTimeout(
@@ -75,7 +75,7 @@ export class SpotFillerBot implements Bot {
 	constructor(
 		name: string,
 		dryRun: boolean,
-		clearingHouse: DriftClient,
+		clearingHouse: ClearingHouse,
 		slotSubscriber: SlotSubscriber,
 		env: DriftEnv,
 		metrics?: Metrics | undefined
@@ -129,7 +129,7 @@ export class SpotFillerBot implements Bot {
 						type: 'polling',
 						accountLoader: (
 							this.clearingHouse
-								.accountSubscriber as PollingDriftClientAccountSubscriber
+								.accountSubscriber as PollingClearingHouseAccountSubscriber
 						).accountLoader,
 					},
 				});
@@ -222,7 +222,7 @@ export class SpotFillerBot implements Bot {
 
 	private async getNodeFillInfo(nodeToFill: NodeToFill): Promise<{
 		makerInfo: MakerInfo | undefined;
-		chUser: User;
+		chUser: ClearingHouseUser;
 		referrerInfo: ReferrerInfo;
 		marketType: MarketType;
 	}> {

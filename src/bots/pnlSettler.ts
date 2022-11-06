@@ -1,6 +1,6 @@
 import {
 	BN,
-	DriftClient,
+	ClearingHouse,
 	UserAccount,
 	PublicKey,
 	PerpMarketConfig,
@@ -37,7 +37,7 @@ export class PnlSettlerBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 600000;
 
-	private clearingHouse: DriftClient;
+	private clearingHouse: ClearingHouse;
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
 	private perpMarkets: PerpMarketConfig[];
@@ -50,7 +50,7 @@ export class PnlSettlerBot implements Bot {
 	constructor(
 		name: string,
 		dryRun: boolean,
-		clearingHouse: DriftClient,
+		clearingHouse: ClearingHouse,
 		perpMarkets: PerpMarketConfig[],
 		spotMarkets: SpotMarketConfig[],
 		metrics?: Metrics | undefined
