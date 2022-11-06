@@ -6,6 +6,7 @@
 	"license": "Apache-2.0",
 	"dependencies": {
 		"@drift-labs/sdk": "0.2.0-master.36",
+		"@creditkarma/vault-client": "^1.0.0",
 		"@opentelemetry/api": "^1.1.0",
 		"@opentelemetry/auto-instrumentations-node": "^0.31.1",
 		"@opentelemetry/exporter-prometheus": "^0.31.0",
