@@ -2,10 +2,10 @@ import {
 	DriftEnv,
 	NewUserRecord,
 	OrderRecord,
-	User,
+	ClearingHouseUser,
 	ReferrerInfo,
 	isOracleValid,
-	DriftClient,
+	ClearingHouse,
 	PerpMarketAccount,
 	SlotSubscriber,
 	calculateAskPrice,
@@ -52,7 +52,7 @@ export class FillerBot implements Bot {
 	public readonly defaultIntervalMs: number = 3000;
 
 	private driftEnv: DriftEnv;
-	private clearingHouse: DriftClient;
+	private clearingHouse: ClearingHouse;
 	private slotSubscriber: SlotSubscriber;
 
 	private dlobMutex = withTimeout(
@@ -79,7 +79,7 @@ export class FillerBot implements Bot {
 	constructor(
 		name: string,
 		dryRun: boolean,
-		clearingHouse: DriftClient,
+		clearingHouse: ClearingHouse,
 		slotSubscriber: SlotSubscriber,
 		env: DriftEnv,
 		metrics?: Metrics | undefined
@@ -284,7 +284,7 @@ export class FillerBot implements Bot {
 
 	private async getNodeFillInfo(nodeToFill: NodeToFill): Promise<{
 		makerInfo: MakerInfo | undefined;
-		chUser: User;
+		chUser: ClearingHouseUser;
 		referrerInfo: ReferrerInfo;
 		marketType: MarketType;
 	}> {

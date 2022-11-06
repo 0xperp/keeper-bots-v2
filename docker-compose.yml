@@ -37,9 +37,9 @@ services:
     # extra_hosts:
     #   - "host.docker.internal:host-gateway"
   
-  drift-jit-bot:
-    container_name: drift-jit-bot
-    image: drift-jit-bot:base
+  jit-bot:
+    container_name: drift-jit-maker
+    image: drift-jit-bot:0xperp
     restart: unless-stopped
     hostname: drift-jit-bot
     network_mode: host
@@ -49,3 +49,31 @@ services:
     #   - monitoring-network
     # extra_hosts:
     #   - "host.docker.internal:host-gateway"
+
+  # nodeexporter:
+  #    image: prom/node-exporter:latest
+  #    volumes:
+  #      - /proc:/host/proc:ro
+  #      - /sys:/host/sys:ro
+  #      - /:/rootfs:ro
+  #    command:
+  #      - '--path.procfs=/host/proc'
+  #      - '--path.rootfs=/rootfs'
+  #      - '--path.sysfs=/host/sys'
+  #      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+  #    restart: unless-stopped
+  #    expose:
+  #      - 9100
+  #    network_mode: host
+
+  # cadvisor:
+  #   image: gcr.io/google-containers/cadvisor:latest
+  #   volumes:
+  #     - /:/rootfs:ro
+  #     - /var/run:/var/run:rw
+  #     - /sys:/sys:ro
+  #     - /var/lib/docker:/var/lib/docker:ro
+  #   restart: unless-stopped
+  #   expose:
+  #     - 8080
+  #   network_mode: host

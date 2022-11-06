@@ -1,8 +1,8 @@
 import {
 	BN,
 	convertToNumber,
-	DriftClient,
-	User,
+	ClearingHouse,
+	ClearingHouseUser,
 	isVariant,
 	OrderRecord,
 	LiquidationRecord,
@@ -12,7 +12,6 @@ import {
 	NewUserRecord,
 	PerpPosition,
 	UserMap,
-	ZERO,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -33,7 +32,7 @@ export class PerpLiquidatorBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 10000;
 
-	private clearingHouse: DriftClient;
+	private clearingHouse: ClearingHouse;
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
 	private metrics: Metrics | undefined;
@@ -56,7 +55,7 @@ export class PerpLiquidatorBot implements Bot {
 	constructor(
 		name: string,
 		dryRun: boolean,
-		clearingHouse: DriftClient,
+		clearingHouse: ClearingHouse,
 		metrics?: Metrics | undefined
 	) {
 		this.name = name;
@@ -191,7 +190,7 @@ export class PerpLiquidatorBot implements Bot {
 	}
 
 	private calculateBaseAmountToLiquidate(
-		liquidatorUser: User,
+		liquidatorUser: ClearingHouseUser,
 		liquidateePosition: PerpPosition
 	): BN {
 		const oraclePrice = this.clearingHouse.getOracleDataForPerpMarket(
@@ -218,104 +217,17 @@ export class PerpLiquidatorBot implements Bot {
 	}
 
 	/**
-	 * Find the user perp position with the largest loss, resolve bankruptcy on this market.
-	 *
-	 * @param chUserToCheck
-	 * @returns
-	 */
-	private findPerpBankruptingMarkets(chUserToCheck: User): Array<number> {
-		const bankruptMarketIndices: Array<number> = [];
-
-		for (const market of this.clearingHouse.getPerpMarketAccounts()) {
-			const position = chUserToCheck.getPerpPosition(market.marketIndex);
-			if (position.quoteAssetAmount.gte(ZERO)) {
-				// invalid position to liquidate
-				continue;
-			}
-			bankruptMarketIndices.push(position.marketIndex);
-		}
-
-		return bankruptMarketIndices;
-	}
-
-	/**
-	 * Find the user spot position with the largest loss, resolve bankruptcy on this market.
-	 *
-	 * @param chUserToCheck
-	 * @returns
-	 */
-	private findSpotBankruptingMarkets(chUserToCheck: User): Array<number> {
-		const bankruptMarketIndices: Array<number> = [];
-
-		for (const market of this.clearingHouse.getSpotMarketAccounts()) {
-			const position = chUserToCheck.getSpotPosition(market.marketIndex);
-			if (!isVariant(position.balanceType, 'borrow')) {
-				// not possible to resolve non-borrow markets
-				continue;
-			}
-			if (position.scaledBalance.lte(ZERO)) {
-				// invalid borrow
-				continue;
-			}
-			bankruptMarketIndices.push(position.marketIndex);
-		}
-
-		return bankruptMarketIndices;
-	}
-
-	private async tryResolveBankruptUser(user: User) {
-		const userAcc = user.getUserAccount();
-		const userKey = user.getUserAccountPublicKey();
-
-		// find out whether the user is perp-bankrupt or spot-bankrupt
-		const bankruptPerpMarkets = this.findPerpBankruptingMarkets(user);
-		const bankruptSpotMarkets = this.findSpotBankruptingMarkets(user);
-
-		// resolve bankrupt markets
-		for (const perpIdx of bankruptPerpMarkets) {
-			logger.info(
-				`Resolving perp market for userAcc: ${userKey.toBase58()}, marketIndex: ${perpIdx}`
-			);
-			const tx = await this.clearingHouse.resolvePerpBankruptcy(
-				userKey,
-				userAcc,
-				perpIdx
-			);
-			logger.info(
-				`Resolved perp market for userAcc: ${userKey.toBase58()}, marketIndex: ${perpIdx}: ${tx}`
-			);
-		}
-
-		for (const spotIdx of bankruptSpotMarkets) {
-			logger.info(
-				`Resolving spot market for userAcc: ${userKey.toBase58()}, marketIndex: ${spotIdx}`
-			);
-			const tx = await this.clearingHouse.resolveSpotBankruptcy(
-				userKey,
-				userAcc,
-				spotIdx
-			);
-			logger.info(
-				`Resolved spot market for userAcc: ${userKey.toBase58()}, marketIndex: ${spotIdx}: ${tx}`
-			);
-		}
-	}
-
-	/**
-	 * iterates over users in userMap and checks:
-	 * 		1. is user bankrupt? if so, resolve bankruptcy
-	 * 		2. is user in liquidation? If so, endangered position is liquidated
+	 * iterates over users in userMap and chekcs if they can be liquidated. If so, their positions are checked to find the
+	 * endangered position to liquidate.
 	 */
 	private async tryLiquidate() {
 		try {
 			for (const user of this.userMap.values()) {
-				const userAcc = user.getUserAccount();
-				const auth = userAcc.authority.toBase58();
+				const auth = user.getUserAccount().authority.toBase58();
 				const userKey = user.userAccountPublicKey.toBase58();
+				const canBeLiquidated = user.canBeLiquidated();
 
-				if (isVariant(userAcc.status, 'bankrupt')) {
-					await this.tryResolveBankruptUser(user);
-				} else if (user.canBeLiquidated()) {
+				if (canBeLiquidated) {
 					logger.info(`liquidating ${auth}: ${userKey}...`);
 
 					const liquidatorUser = this.clearingHouse.getUser();

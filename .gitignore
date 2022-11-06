@@ -1,5 +1,6 @@
 monitoring/grafana/grafana-storage/* 
 monitoring/grafana/grafana-storage/grafana.db
+
 # Created by https://www.gitignore.io/api/osx,node,linux,windows
 
 ### Linux ###
@@ -141,3 +142,4 @@ src/**.js.map
 
 .env
 lib
+.gitignore

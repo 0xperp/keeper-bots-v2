@@ -12,8 +12,8 @@ import {
 import {
 	getVariant,
 	BulkAccountLoader,
-	DriftClient,
-	User,
+	ClearingHouse,
+	ClearingHouseUser,
 	initialize,
 	Wallet,
 	DriftEnv,
@@ -148,7 +148,7 @@ function sleep(ms) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function printUserAccountStats(clearingHouseUser: User) {
+function printUserAccountStats(clearingHouseUser: ClearingHouseUser) {
 	const freeCollateral = clearingHouseUser.getFreeCollateral();
 	logger.info(
 		`User free collateral: $${convertToNumber(
@@ -171,7 +171,7 @@ function printUserAccountStats(clearingHouseUser: User) {
 	);
 }
 
-function printOpenPositions(clearingHouseUser: User) {
+function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
 	logger.info('Open Perp Positions:');
 	for (const p of clearingHouseUser.getUserAccount().perpPositions) {
 		if (p.baseAssetAmount.isZero()) {
@@ -240,8 +240,10 @@ function printOpenPositions(clearingHouseUser: User) {
 
 const bots: Bot[] = [];
 const runBot = async () => {
-	const wallet = await getWallet();
-	const clearingHousePublicKey = new PublicKey(sdkConfig.DRIFT_PROGRAM_ID);
+	const wallet = getWallet();
+	const clearingHousePublicKey = new PublicKey(
+		sdkConfig.CLEARING_HOUSE_PROGRAM_ID
+	);
 
 	const connection = new Connection(endpoint, stateCommitment);
 
@@ -250,7 +252,7 @@ const runBot = async () => {
 		stateCommitment,
 		1000
 	);
-	const clearingHouse = new DriftClient({
+	const clearingHouse = new ClearingHouse({
 		connection,
 		wallet,
 		programID: clearingHousePublicKey,
@@ -287,7 +289,7 @@ const runBot = async () => {
 
 	const lamportsBalance = await connection.getBalance(wallet.publicKey);
 	logger.info(
-		`DriftClient ProgramId: ${clearingHouse.program.programId.toBase58()}`
+		`ClearingHouse ProgramId: ${clearingHouse.program.programId.toBase58()}`
 	);
 	logger.info(`Wallet pubkey: ${wallet.publicKey.toBase58()}`);
 	logger.info(` . SOL balance: ${lamportsBalance / 10 ** 9}`);
@@ -331,7 +333,7 @@ const runBot = async () => {
 		!(await clearingHouseUser.subscribe()) ||
 		!eventSubscriber.subscribe()
 	) {
-		logger.info('waiting to subscribe to DriftClient and User');
+		logger.info('waiting to subscribe to ClearingHouse and User');
 		await sleep(1000);
 	}
 	logger.info(
