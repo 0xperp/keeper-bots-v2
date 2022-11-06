@@ -4,7 +4,7 @@ services:
     container_name: grafana
     image: grafana/grafana:latest
     restart: unless-stopped
-    hostname: grafana 
+    hostname: grafana
     user: "0"
     volumes:
       - ./monitoring/grafana/grafana.ini:/etc/grafana/grafana.ini
@@ -12,13 +12,12 @@ services:
       - ./monitoring/grafana/grafanaDashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
       - ./monitoring/grafana/grafana-storage:/var/lib/grafana
-    network_mode: host
-    # ports:
-    #   - 3000:3000
-    # networks:
-    #   - monitoring-network
-    # extra_hosts:
-    #   - "host.docker.internal:host-gateway"
+    networks:
+      - drift-network
+    ports:
+      - 3000:3000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   prometheus:
     container_name: prometheus
@@ -29,26 +28,24 @@ services:
     command: --storage.tsdb.retention.time=5y --config.file=/etc/prometheus/prometheus.yml
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-    network_mode: host
-    # ports:
-    #   - 9090:9090
-    # networks:
-    #   - monitoring-network
-    # extra_hosts:
-    #   - "host.docker.internal:host-gateway"
+    networks:
+      - drift-network
+    ports:
+      - 9090:9090
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
   
   jit-bot:
     container_name: drift-jit-maker
-    image: drift-jit-bot:0xperp
+    image: jit:0xperp
     restart: unless-stopped
     hostname: drift-jit-bot
-    network_mode: host
-    # ports:
-    #   - 9090:9090
-    # networks:
-    #   - monitoring-network
-    # extra_hosts:
-    #   - "host.docker.internal:host-gateway"
+    networks:
+      - drift-network
+    ports:
+      - 9464:9464
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   # nodeexporter:
   #    image: prom/node-exporter:latest
@@ -77,3 +74,7 @@ services:
   #   expose:
   #     - 8080
   #   network_mode: host
+
+networks:
+  drift-network:
+    driver: bridge

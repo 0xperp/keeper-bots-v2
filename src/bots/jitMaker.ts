@@ -1,7 +1,7 @@
 /**
  * Improvements
  *
- * - [ ] vault
+ * - [x] vault
  * - [x] monitoring
  * - [x] add in full grafana dashboards and datasources from load
  * - [x] ability to re bid a specific auction
@@ -40,7 +40,11 @@ import { getErrorCode } from '../error';
 import { logger } from '../logger';
 import { Bot } from '../types';
 import { Metrics } from '../metrics';
-import { PythHttpClient, PriceStatus, getPythProgramKeyForCluster } from '@pythnetwork/client';
+import {
+	PythHttpClient,
+	PriceStatus,
+	getPythProgramKeyForCluster,
+} from '@pythnetwork/client';
 
 type Action = {
 	baseAssetAmount: BN;
@@ -524,7 +528,7 @@ export class JitMakerBot implements Bot {
 		jitMakerBaseAssetAmount,
 		nodeToFill,
 		jitMakerDirection,
-		jitMakerPrice,
+		jitMakerPrice
 	) {
 		const txSig = await this.executePerpOrder({
 			baseAssetAmount: jitMakerBaseAssetAmount,
@@ -534,7 +538,7 @@ export class JitMakerBot implements Bot {
 			node: nodeToFill.node,
 		});
 
-		logger.info(`Transaction sent ${txSig}`)
+		logger.info(`Transaction sent ${txSig}`);
 
 		// record the order being filled into the prometheus metrics
 		this.metrics?.recordFilledOrder(
@@ -646,15 +650,22 @@ export class JitMakerBot implements Bot {
 				} slots since order, auction ends in ${aucEnd - currSlot} slots`
 			);
 
-			// Check Pyth Oracle for asset to determine best pricing 
-			const pythClient = new PythHttpClient(new Connection(this.clearingHouse.connection.rpcEndpoint), getPythProgramKeyForCluster('devnet'));
-			const data = await pythClient.getData();	
-			const symbol = 'Crypto.' + marketSymbol.split('-')[0] + '/USD'
+			// Check Pyth Oracle for asset to determine best pricing
+			const pythClient = new PythHttpClient(
+				new Connection(this.clearingHouse.connection.rpcEndpoint),
+				getPythProgramKeyForCluster('devnet')
+			);
+			const data = await pythClient.getData();
+			const symbol = 'Crypto.' + marketSymbol.split('-')[0] + '/USD';
 
 			const pythPrice = data.productPrice.get(symbol)!;
 			// Sample output:
 			// Crypto.SRM/USD: $8.68725 ±$0.0131 Status: Trading
-			logger.info(`PYTH ${symbol}: $${pythPrice.price} \xB1$${pythPrice.confidence} Status: ${PriceStatus[pythPrice.status]}`)
+			logger.info(
+				`PYTH ${symbol}: $${pythPrice.price} \xB1$${
+					pythPrice.confidence
+				} Status: ${PriceStatus[pythPrice.status]}`
+			);
 			logger.info(
 				`${marketSymbol} ${JSON.stringify(jitMakerDirection)} ${convertToNumber(
 					jitMakerBaseAssetAmount,
@@ -671,21 +682,24 @@ export class JitMakerBot implements Bot {
 				).toFixed(4)})`
 			);
 
-			// Auctions run like this 
+			// Auctions run like this
 			// Long
 			// - Auction starts at the oracle price
 			// - Auction ends at the AMM asking price
 			//
 			// Short
-			// - Auction starts at the oracle price 
+			// - Auction starts at the oracle price
 			// - Auction ends at the AMM bid price
 			//
-			// Right now this bot bids direct at this oracle price, 
+			// Right now this bot bids direct at this oracle price,
 			// check the oracle direct and quote in between the start and the end price
 			// closer to the AMM price the more $ is made but also makes it less likely to win an auction
 
 			// check if oracle price status is down
-			if (PriceStatus[pythPrice.status] == "Halted" || PriceStatus[pythPrice.status] == "Unknown") {
+			if (
+				PriceStatus[pythPrice.status] == 'Halted' ||
+				PriceStatus[pythPrice.status] == 'Unknown'
+			) {
 				break;
 			}
 
@@ -695,7 +709,7 @@ export class JitMakerBot implements Bot {
 					jitMakerBaseAssetAmount,
 					nodeToFill,
 					jitMakerDirection,
-					new BN(pythPrice.price),
+					new BN(pythPrice.price)
 				);
 				return txSig;
 			} catch (error) {
@@ -707,7 +721,9 @@ export class JitMakerBot implements Bot {
 					nodeToFill.node.userAccount
 				);
 
-				logger.info(`Order failed but OrderStatus=${orderStatus} order likely filled, not retrying`);
+				logger.info(
+					`Order failed but OrderStatus=${orderStatus} order likely filled, not retrying`
+				);
 
 				// orderStatus is true if the order is still in the orderbook
 				// and is still able to be filled, otherwise it has already
@@ -718,7 +734,7 @@ export class JitMakerBot implements Bot {
 						jitMakerBaseAssetAmount,
 						nodeToFill,
 						jitMakerDirection,
-						jitMakerPrice,
+						jitMakerPrice
 					);
 					return txSig;
 				}
@@ -733,7 +749,7 @@ export class JitMakerBot implements Bot {
 					this.clearingHouse.provider.wallet.publicKey,
 					this.name
 				);
-				
+
 				// TODO: log information specific to certain errors and maybe take action on it
 				if (errorCode == 6094) {
 					logger.error(
