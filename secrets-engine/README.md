@@ -7,7 +7,7 @@ As large institutional players and firms look to operate as market makers, liqui
 
 A common approach for trading custody is through various providers like [fireblocks](https://fireblocks.com) or [copper](https://copper.co). This works quite well for trading given the integrations that each platform has built out. If you want to implement and operate your own trading infrastructure you will need API access which is often lacking across many of these platforms. Additionally each of these platforms are institutional grade and thus their pricing reflects that.
 
-A institutional standard for secret storage is [Hashicorp Vault](https://www.vaultproject.io). Vault is a secret store and has a very robust API. 
+A institutional standard for secret storage is [Hashicorp Vault](https://www.vaultproject.io). Vault is a secret store and has a very robust API and even alllows alerting on secret access or signing via [Sentinel Policies](https://developer.hashicorp.com/vault/tutorials/policies/sentinel).
 
 The easiest way to integrate vault is through pushing your private key as a key-value pair and accessing it from within your program. 
 

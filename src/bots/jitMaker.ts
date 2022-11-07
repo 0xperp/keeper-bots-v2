@@ -595,14 +595,6 @@ export class JitMakerBot implements Bot {
 			MarketType.PERP
 		);
 
-		logger.error(
-			`Market Index ${
-				market.marketIndex
-			}, Slot ${this.slotSubscriber.getSlot()}, Nodes to fill ${
-				nodesToFill.length
-			}`
-		);
-
 		// iterate over each node, determine if it can be filled, and fill it
 		for (const nodeToFill of nodesToFill) {
 			// check if the node can be filled

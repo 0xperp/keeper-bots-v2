@@ -34,6 +34,28 @@ services:
       - 9090:9090
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    
+  loki:
+    container_name: loki
+    image: grafana/loki:latest
+    hostname: loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - drift-network
+
+  promtail:
+    container_name: promtail
+    image: grafana/promtail:latest
+    hostname: promtail
+    volumes:
+      - /var/log:/var/log
+      - /var/lib/docker/containers:/var/lib/docker/containers
+      - /home/ubuntu/keeper-bots-v2/monitoring/prometheus/promtail.yml:/etc/promtail/promtail.yml
+    command: -config.file=/etc/promtail/promtail.yml
+    networks:
+      - drift-network
   
   jit-bot:
     container_name: drift-jit-maker
@@ -47,33 +69,39 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-  # nodeexporter:
-  #    image: prom/node-exporter:latest
-  #    volumes:
-  #      - /proc:/host/proc:ro
-  #      - /sys:/host/sys:ro
-  #      - /:/rootfs:ro
-  #    command:
-  #      - '--path.procfs=/host/proc'
-  #      - '--path.rootfs=/rootfs'
-  #      - '--path.sysfs=/host/sys'
-  #      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
-  #    restart: unless-stopped
-  #    expose:
-  #      - 9100
-  #    network_mode: host
+  nodeexporter:
+     container_name: node_exporter
+     image: prom/node-exporter:latest
+     hostname: node_exporter
+     volumes:
+       - /proc:/host/proc:ro
+       - /sys:/host/sys:ro
+       - /:/rootfs:ro
+     command:
+       - '--path.procfs=/host/proc'
+       - '--path.rootfs=/rootfs'
+       - '--path.sysfs=/host/sys'
+       - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+     restart: unless-stopped
+     expose:
+       - 9100
+     networks:
+      - drift-network
 
-  # cadvisor:
-  #   image: gcr.io/google-containers/cadvisor:latest
-  #   volumes:
-  #     - /:/rootfs:ro
-  #     - /var/run:/var/run:rw
-  #     - /sys:/sys:ro
-  #     - /var/lib/docker:/var/lib/docker:ro
-  #   restart: unless-stopped
-  #   expose:
-  #     - 8080
-  #   network_mode: host
+  cadvisor:
+    container_name: cadvisor
+    image: gcr.io/cadvisor/cadvisor
+    hostname: cadvisor
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+    restart: unless-stopped
+    expose:
+      - 8080
+    networks:
+      - drift-network
 
 networks:
   drift-network:
