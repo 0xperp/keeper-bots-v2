@@ -1,7 +1,7 @@
 /**
  * Improvements
  *
- * - [ ] vault
+ * - [x] vault
  * - [x] monitoring
  * - [x] add in full grafana dashboards and datasources from load
  * - [x] ability to re bid a specific auction
