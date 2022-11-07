@@ -104,10 +104,11 @@ PnlSettler enabled: ${!!opts.pnlSettler},\n\
 export async function getWallet(): Promise<Wallet> {
 	let privateKey;
 	if (opts.vault) {
-		await fetch('http://127.0.0.1:8200/v1/secret/data/pk', {
+		await fetch(process.env.VAULT_ENDPOINT, {
 			method: 'GET',
 			headers: {
 				'X-Vault-Token': process.env.VAULT_TOKEN,
+				'X-Vault-Namespace': 'admin',
 			},
 		})
 			.then((response) => response.json())
@@ -240,7 +241,7 @@ function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
 
 const bots: Bot[] = [];
 const runBot = async () => {
-	const wallet = getWallet();
+	const wallet = await getWallet();
 	const clearingHousePublicKey = new PublicKey(
 		sdkConfig.CLEARING_HOUSE_PROGRAM_ID
 	);

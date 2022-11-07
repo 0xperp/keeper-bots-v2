@@ -27,6 +27,32 @@ export VAULT_ADDR='http://127.0.0.1:8200'
 vault kv put -mount=secret pk pk=<enter your private key here>
 ```
 
+### Hashicorp Hosted Platform 
+Launching the hosted platform you will need to create a policy, create a token and assign it a rol. You can read about token authentication [here](https://developer.hashicorp.com/vault/tutorials/tokens/tokens)
+
+Create a `.hcl` file to serve as the policy
+```
+# read solana pk
+path "secret/+/pk" {
+    capabilities = ["read", "list"]
+}
+```
+
+Write out vault policy and assign the role to a token
+```
+vault policy write solana solana.hcl
+```
+
+Write out auth and assign the role
+```
+vault write auth/token/roles/bot \
+    allowed_policies="solana" \
+    orphan=true \
+    period=8h
+
+vault token create -role=bot
+```
+
 ### Secrets Engine Usage 
 **Not fully implemented yet**
 The build of this module can be found in [plugin.md](./plugin.md)

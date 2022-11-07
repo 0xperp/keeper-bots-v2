@@ -553,8 +553,8 @@ export class JitMakerBot implements Bot {
 	private async fillPerpOrder(
 		baseAssetAmount,
 		nodeToFill,
-		jitMakerDirection,
-		jitMakerPrice,
+		direction,
+		makerPrice,
 	) {
 		const txSig = await this.executePerpOrder({
 			baseAssetAmount: baseAssetAmount,
@@ -570,22 +570,6 @@ export class JitMakerBot implements Bot {
 		this.metrics?.recordFilledOrder(
 			this.clearingHouse.provider.wallet.publicKey,
 			this.name
-		);
-
-		logger.info(
-			`${marketSymbol} ${JSON.stringify(direction)} ${convertToNumber(
-				baseAssetAmount,
-				BASE_PRECISION
-			).toString()} at a price of ${convertToNumber(
-				makerPrice,
-				PRICE_PRECISION
-			).toFixed(4)} (auction start:end ${convertToNumber(
-				makerPrice,
-				PRICE_PRECISION
-			).toFixed(4)} - ${convertToNumber(
-				auctionEndPrice,
-				PRICE_PRECISION
-			).toFixed(4)})`
 		);
 
 		logger.info(
