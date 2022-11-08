@@ -94,7 +94,6 @@ func (b *backend) handleExistenceCheck(ctx context.Context, req *logical.Request
 }
 
 func (b *backend) handleRead(ctx context.Context, req *logical.Request, data *framework.FieldData) (*logical.Response, error) {
-	b.Backend.Logger().Info("REEEEAAAAD")
 	if req.ClientToken == "" {
 		return nil, fmt.Errorf("client token empty")
 	}

@@ -339,7 +339,7 @@ export class SpotFillerBot implements Bot {
 						delete this.dlob;
 					}
 					this.dlob = new DLOB(
-						this.clearingHouse.getPerpMarketAccounts(), // TODO: new sdk - remove this
+						this.clearingHouse.getPerpMarketAccounts(),
 						this.clearingHouse.getSpotMarketAccounts(),
 						this.clearingHouse.getStateAccount(),
 						this.userMap,

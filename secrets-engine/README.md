@@ -1,5 +1,5 @@
 # Securely Storing Private Keys for Bot Operators 
-## **Expirmental***
+## **Experimental***
 ### Overview
 Right now most bot operaters use a `.env` file to store their private key in plain text. Compromising this key would lead to full control and access of the account. If the bot requires collateral to operate this is even more of a concern. 
 
@@ -13,7 +13,7 @@ The easiest way to integrate vault is through pushing your private key as a key-
 
 Note, needing to read the private key from a key-value pair in your program is far better than storing in an `.env` (for security, flexability, and an audit trail) but still leaves the private key in memory which can easily be dumped and read!
 
-The best and most secure usage is to have a module within hashicorp that listens for a raw unsigned transaction and signs it within the vault (also note: very expiremental feature). [github.com/saberistic/solana-secrets-engine](https://github.com/saberistic/solana-secrets-engine) starts on this work, and I plan on continuing and improving it in the future.
+The best and most secure usage is to have a module within hashicorp that listens for a raw unsigned transaction and signs it within the vault (also note: very experimental feature). [github.com/saberistic/solana-secrets-engine](https://github.com/saberistic/solana-secrets-engine) starts on this work, and I plan on continuing and improving it in the future.
 
 ### Key Value Usage 
 ```

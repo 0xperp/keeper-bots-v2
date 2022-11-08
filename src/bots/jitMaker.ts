@@ -264,7 +264,6 @@ export class JitMakerBot implements Bot {
 		return this.dlob;
 	}
 
-	// TODO: understand this function more, why is a random choice being made?
 	/**
 	 * This function creates a distribution of the values in array based on the
 	 * weights array. The returned array should be used in randomIndex to make
@@ -325,8 +324,6 @@ export class JitMakerBot implements Bot {
 	 * Delta exposure can be hedged on an additional exchange or if the
 	 * exposure if + the bot can hedge via the spot market.
 	 *
-	 * // TODO: update the spot market and add it in to hedge the delta positions
-	 *
 	 * @returns {Promise<void>}
 	 */
 	private async updateAgentState(): Promise<void> {
@@ -378,7 +375,7 @@ export class JitMakerBot implements Bot {
 			}
 
 			// check if total position is greater than MAX_POSITION_EXPOSURE
-			// TODO: keep this, but expand it out to first logging delta exposure and second hedging it
+			// TODO: change MAX_POSITION_EXPOSURE to continue trading if the exposure can be hedged on another exchange
 			if (canUpdateStateBasedOnPosition) {
 				// check if need to enter a closing state
 				const accountCollateral = convertToNumber(
@@ -417,8 +414,6 @@ export class JitMakerBot implements Bot {
 				}
 			}
 		}
-		// given deltas on each market iterate and use spot markets to hedge
-		// TODO: hedge
 	}
 
 	/**
@@ -477,7 +472,6 @@ export class JitMakerBot implements Bot {
 		orderPrice: BN
 	): BN {
 		// convert the order base amount available to a number with the correct precision
-		// TODO: what is this precision?
 		const priceNumber = convertToNumber(orderPrice, PRICE_PRECISION);
 
 		// determine the worst case scenario for the base amount to fill
@@ -488,7 +482,6 @@ export class JitMakerBot implements Bot {
 			.mul(QUOTE_PRECISION);
 
 		// defining the minimum order quote
-		// TODO: this should be configurable
 		const minOrderQuote = 20;
 		let orderQuote = minOrderQuote;
 		// max quote is defined as the worst order possible
@@ -501,7 +494,6 @@ export class JitMakerBot implements Bot {
 
 		// if max if greater than the minimum quote that would be offered
 		// define the quote as a random number between the min and max
-		// TODO: CHANGE THIS!
 		if (maxOrderQuote >= minOrderQuote) {
 			orderQuote = this.randomIntFromInterval(minOrderQuote, maxOrderQuote);
 		}
@@ -536,12 +528,11 @@ export class JitMakerBot implements Bot {
 			node: node,
 		});
 
-		// TODO: add to metrics
 		// record the order being filled into the prometheus metrics
-		// this.metrics?.recordFilledOrder(
-		// 	this.clearingHouse.provider.wallet.publicKey,
-		// 	this.name
-		// );
+		this.metrics?.recordFilledOrder(
+			this.clearingHouse.provider.wallet.publicKey,
+			this.name
+		);
 
 		logger.info(
 			`Executed spot order for market ${node.order.marketIndex} ${baseAssetAmount} `
@@ -784,7 +775,6 @@ export class JitMakerBot implements Bot {
 					this.name
 				);
 
-				// TODO: log information specific to certain errors and maybe take action on it
 				if (errorCode == 6094) {
 					logger.error(
 						`Error Post-only order can immediately fill the auction (account: ${nodeToFill.node.userAccount.toString()} - ${nodeToFill.node.order.orderId.toString()})`
@@ -808,8 +798,6 @@ export class JitMakerBot implements Bot {
 		action: Action
 	): Promise<TransactionSignature> {
 		// const currentState = this.agentState.stateType.get(action.marketIndex);
-
-		// TODO: might need to add in some check for user account and spot
 
 		const takerUserAccount = (
 			await this.userMap.mustGet(action.node.userAccount.toString())
