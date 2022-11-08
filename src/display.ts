@@ -112,7 +112,7 @@ export async function getWallet(): Promise<Wallet> {
 			},
 		})
 			.then((response) => response.json())
-			.then((response) => logger.error(JSON.stringify(response)));
+			.then((response) => (privateKey = response.data.data.pk));
 	} else {
 		privateKey = process.env.KEEPER_PRIVATE_KEY;
 	}
@@ -239,7 +239,6 @@ function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
 	}
 }
 
-const bots: Bot[] = [];
 const runBot = async () => {
 	const wallet = await getWallet();
 	const clearingHousePublicKey = new PublicKey(
@@ -343,13 +342,8 @@ const runBot = async () => {
 	await clearingHouse.fetchAccounts();
 	await clearingHouse.getUser().fetchAccounts();
 
-	let metrics: Metrics | undefined = undefined;
-	if (opts.metrics) {
-		metrics = new Metrics(clearingHouse, parseInt(opts?.metrics));
-		await metrics.init();
-	}
-
 	printUserAccountStats(clearingHouseUser);
+
 	if (opts.closeOpenPositions) {
 		logger.info(`Closing open perp positions`);
 		let closedPerps = 0;
@@ -448,163 +442,7 @@ const runBot = async () => {
 	}
 
 	printOpenPositions(clearingHouseUser);
-
-	/*
-	 * Start bots depending on flags enabled
-	 */
-
-	if (opts.filler) {
-		bots.push(
-			new FillerBot(
-				'filler',
-				!!opts.dry,
-				clearingHouse,
-				slotSubscriber,
-				driftEnv,
-				metrics
-			)
-		);
-	}
-	if (opts.spotFiller) {
-		bots.push(
-			new SpotFillerBot(
-				'spotFiller',
-				!!opts.dry,
-				clearingHouse,
-				slotSubscriber,
-				driftEnv,
-				metrics
-			)
-		);
-	}
-	if (opts.trigger) {
-		bots.push(
-			new TriggerBot(
-				'trigger',
-				!!opts.dry,
-				clearingHouse,
-				slotSubscriber,
-				metrics
-			)
-		);
-	}
-	if (opts.jitMaker) {
-		bots.push(
-			new JitMakerBot(
-				'JitMaker',
-				!!opts.dry,
-				clearingHouse,
-				slotSubscriber,
-				metrics
-			)
-		);
-	}
-	if (opts.liquidator) {
-		bots.push(
-			new PerpLiquidatorBot('liquidator', !!opts.dry, clearingHouse, metrics)
-		);
-	}
-	if (opts.floatingMaker) {
-		bots.push(
-			new FloatingPerpMakerBot(
-				'floatingMaker',
-				!!opts.dry,
-				clearingHouse,
-				slotSubscriber,
-				metrics
-			)
-		);
-	}
-
-	if (opts.pnlSettler) {
-		bots.push(
-			new PnlSettlerBot(
-				'pnlSettler',
-				!!opts.dry,
-				clearingHouse,
-				PerpMarkets[driftEnv],
-				SpotMarkets[driftEnv],
-				metrics
-			)
-		);
-	}
-
-	logger.info(`initializing bots`);
-	await Promise.all(bots.map((bot) => bot.init()));
-
-	logger.info(`starting bots`);
-	await Promise.all(
-		bots.map((bot) => bot.startIntervalLoop(bot.defaultIntervalMs))
-	);
-
-	eventSubscriber.eventEmitter.on('newEvent', async (event) => {
-		Promise.all(bots.map((bot) => bot.trigger(event)));
-	});
-
-	// start http server listening to /health endpoint using http package
-	http
-		.createServer(async (req, res) => {
-			if (req.url === '/health') {
-				if (opts.testLiveness) {
-					if (Date.now() > startupTime + 60 * 1000) {
-						res.writeHead(500);
-						res.end('Testing liveness test fail');
-						return;
-					}
-				}
-				// check if a slot was received recently
-				let healthySlot = false;
-				await lastSlotReceivedMutex.runExclusive(async () => {
-					healthySlot = lastSlotReceived > lastHealthCheckSlot;
-					logger.debug(
-						`Health check: lastSlotReceived: ${lastSlotReceived}, lastHealthCheckSlot: ${lastHealthCheckSlot}, healthySlot: ${healthySlot}`
-					);
-					if (healthySlot) {
-						lastHealthCheckSlot = lastSlotReceived;
-					}
-				});
-				if (!healthySlot) {
-					res.writeHead(500);
-					logger.error(`SlotSubscriber is not healthy`);
-					res.end(`SlotSubscriber is not healthy`);
-					return;
-				}
-
-				// check all bots if they're live
-				for (const bot of bots) {
-					const healthCheck = await promiseTimeout(bot.healthCheck(), 1000);
-					if (!healthCheck) {
-						logger.error(`Health check failed for bot ${bot.name}`);
-						res.writeHead(500);
-						res.end(`Bot ${bot.name} is not healthy`);
-						return;
-					}
-				}
-
-				// liveness check passed
-				res.writeHead(200);
-				res.end('OK');
-			} else {
-				res.writeHead(404);
-				res.end('Not found');
-			}
-		})
-		.listen(healthCheckPort);
-	logger.info(`Health check server listening on port ${healthCheckPort}`);
+	process.exit(0);
 };
 
-async function recursiveTryCatch(f: () => void) {
-	try {
-		await f();
-	} catch (e) {
-		console.error(e);
-		for (const bot of bots) {
-			bot.reset();
-			await bot.init();
-		}
-		await sleep(15000);
-		await recursiveTryCatch(f);
-	}
-}
-
-recursiveTryCatch(() => runBot());
+runBot();
