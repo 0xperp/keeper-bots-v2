@@ -143,3 +143,4 @@ src/**.js.map
 .env
 lib
 .gitignore
+.env.old

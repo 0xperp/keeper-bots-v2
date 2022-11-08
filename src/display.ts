@@ -1,6 +1,5 @@
 import fs from 'fs';
 import { program, Option } from 'commander';
-import * as http from 'http';
 
 import { Connection, Commitment, Keypair, PublicKey } from '@solana/web3.js';
 
@@ -12,8 +11,8 @@ import {
 import {
 	getVariant,
 	BulkAccountLoader,
-	DriftClient,
-	User,
+	ClearingHouse,
+	ClearingHouseUser,
 	initialize,
 	Wallet,
 	DriftEnv,
@@ -29,20 +28,9 @@ import {
 	getSignedTokenAmount,
 	TokenFaucet,
 } from '@drift-labs/sdk';
-import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
-import { Mutex } from 'async-mutex';
 
 import { logger, setLogLevel } from './logger';
 import { constants } from './types';
-import { FillerBot } from './bots/filler';
-import { SpotFillerBot } from './bots/spotFiller';
-import { TriggerBot } from './bots/trigger';
-import { JitMakerBot } from './bots/jitMaker';
-import { PerpLiquidatorBot } from './bots/liquidator';
-import { FloatingPerpMakerBot } from './bots/floatingMaker';
-import { Bot } from './types';
-import { Metrics } from './metrics';
-import { PnlSettlerBot } from './bots/pnlSettler';
 import {
 	getOrCreateAssociatedTokenAccount,
 	TOKEN_FAUCET_PROGRAM_ID,
@@ -54,7 +42,6 @@ const driftEnv = process.env.ENV as DriftEnv;
 const sdkConfig = initialize({ env: process.env.ENV });
 
 const stateCommitment: Commitment = 'confirmed';
-const healthCheckPort = process.env.HEALTH_CHECK_PORT || 8888;
 
 program
 	.option('-d, --dry-run', 'Dry run, do not send transactions on chain')
@@ -112,7 +99,7 @@ export async function getWallet(): Promise<Wallet> {
 			},
 		})
 			.then((response) => response.json())
-			.then((response) => logger.error(JSON.stringify(response)));
+			.then((response) => (privateKey = response.data.data.pk));
 	} else {
 		privateKey = process.env.KEEPER_PRIVATE_KEY;
 	}
@@ -149,7 +136,7 @@ function sleep(ms) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function printUserAccountStats(clearingHouseUser: User) {
+function printUserAccountStats(clearingHouseUser: ClearingHouseUser) {
 	const freeCollateral = clearingHouseUser.getFreeCollateral();
 	logger.info(
 		`User free collateral: $${convertToNumber(
@@ -172,7 +159,7 @@ function printUserAccountStats(clearingHouseUser: User) {
 	);
 }
 
-function printOpenPositions(clearingHouseUser: User) {
+function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
 	logger.info('Open Perp Positions:');
 	for (const p of clearingHouseUser.getUserAccount().perpPositions) {
 		if (p.baseAssetAmount.isZero()) {
@@ -239,10 +226,11 @@ function printOpenPositions(clearingHouseUser: User) {
 	}
 }
 
-const bots: Bot[] = [];
 const runBot = async () => {
 	const wallet = await getWallet();
-	const clearingHousePublicKey = new PublicKey(sdkConfig.DRIFT_PROGRAM_ID);
+	const clearingHousePublicKey = new PublicKey(
+		sdkConfig.CLEARING_HOUSE_PROGRAM_ID
+	);
 
 	const connection = new Connection(endpoint, stateCommitment);
 
@@ -251,7 +239,7 @@ const runBot = async () => {
 		stateCommitment,
 		1000
 	);
-	const clearingHouse = new DriftClient({
+	const clearingHouse = new ClearingHouse({
 		connection,
 		wallet,
 		programID: clearingHousePublicKey,
@@ -281,10 +269,6 @@ const runBot = async () => {
 	);
 
 	const slotSubscriber = new SlotSubscriber(connection, {});
-	const lastSlotReceivedMutex = new Mutex();
-	let lastSlotReceived: number;
-	let lastHealthCheckSlot = -1;
-	const startupTime = Date.now();
 
 	const lamportsBalance = await connection.getBalance(wallet.publicKey);
 	logger.info(
@@ -292,18 +276,13 @@ const runBot = async () => {
 	);
 	logger.info(`Wallet pubkey: ${wallet.publicKey.toBase58()}`);
 	logger.info(` . SOL balance: ${lamportsBalance / 10 ** 9}`);
-
-	try {
-		const tokenAccount = await getOrCreateAssociatedTokenAccount(
-			connection,
-			new PublicKey(constants.devnet.USDCMint),
-			wallet
-		);
-		const usdcBalance = await connection.getTokenAccountBalance(tokenAccount);
-		logger.info(` . USDC balance: ${usdcBalance.value.uiAmount}`);
-	} catch (e) {
-		logger.info(`Failed to load USDC token account: ${e}`);
-	}
+	const tokenAccount = await getOrCreateAssociatedTokenAccount(
+		connection,
+		new PublicKey(constants.devnet.USDCMint),
+		wallet
+	);
+	const usdcBalance = await connection.getTokenAccountBalance(tokenAccount);
+	logger.info(` . USDC balance: ${usdcBalance.value.uiAmount}`);
 
 	await clearingHouse.subscribe();
 	clearingHouse.eventEmitter.on('error', (e) => {
@@ -313,11 +292,6 @@ const runBot = async () => {
 
 	eventSubscriber.subscribe();
 	await slotSubscriber.subscribe();
-	slotSubscriber.eventEmitter.on('newSlot', async (slot: number) => {
-		await lastSlotReceivedMutex.runExclusive(async () => {
-			lastSlotReceived = slot;
-		});
-	});
 
 	if (!(await clearingHouse.getUser().exists())) {
 		logger.error(`User for ${wallet.publicKey} does not exist`);
@@ -346,13 +320,8 @@ const runBot = async () => {
 	await clearingHouse.fetchAccounts();
 	await clearingHouse.getUser().fetchAccounts();
 
-	let metrics: Metrics | undefined = undefined;
-	if (opts.metrics) {
-		metrics = new Metrics(clearingHouse, parseInt(opts?.metrics));
-		await metrics.init();
-	}
-
 	printUserAccountStats(clearingHouseUser);
+
 	if (opts.closeOpenPositions) {
 		logger.info(`Closing open perp positions`);
 		let closedPerps = 0;
@@ -433,6 +402,9 @@ const runBot = async () => {
 
 	// print user orders
 	logger.info('');
+	logger.info(
+		`Open orders: ${clearingHouseUser.getUserAccount().orders.length}`
+	);
 	const ordersToCancel: Array<number> = [];
 	for (const order of clearingHouseUser.getUserAccount().orders) {
 		if (order.baseAssetAmount.isZero()) {
@@ -448,163 +420,7 @@ const runBot = async () => {
 	}
 
 	printOpenPositions(clearingHouseUser);
-
-	/*
-	 * Start bots depending on flags enabled
-	 */
-
-	if (opts.filler) {
-		bots.push(
-			new FillerBot(
-				'filler',
-				!!opts.dry,
-				clearingHouse,
-				slotSubscriber,
-				driftEnv,
-				metrics
-			)
-		);
-	}
-	if (opts.spotFiller) {
-		bots.push(
-			new SpotFillerBot(
-				'spotFiller',
-				!!opts.dry,
-				clearingHouse,
-				slotSubscriber,
-				driftEnv,
-				metrics
-			)
-		);
-	}
-	if (opts.trigger) {
-		bots.push(
-			new TriggerBot(
-				'trigger',
-				!!opts.dry,
-				clearingHouse,
-				slotSubscriber,
-				metrics
-			)
-		);
-	}
-	if (opts.jitMaker) {
-		bots.push(
-			new JitMakerBot(
-				'JitMaker',
-				!!opts.dry,
-				clearingHouse,
-				slotSubscriber,
-				metrics
-			)
-		);
-	}
-	if (opts.liquidator) {
-		bots.push(
-			new PerpLiquidatorBot('liquidator', !!opts.dry, clearingHouse, metrics)
-		);
-	}
-	if (opts.floatingMaker) {
-		bots.push(
-			new FloatingPerpMakerBot(
-				'floatingMaker',
-				!!opts.dry,
-				clearingHouse,
-				slotSubscriber,
-				metrics
-			)
-		);
-	}
-
-	if (opts.pnlSettler) {
-		bots.push(
-			new PnlSettlerBot(
-				'pnlSettler',
-				!!opts.dry,
-				clearingHouse,
-				PerpMarkets[driftEnv],
-				SpotMarkets[driftEnv],
-				metrics
-			)
-		);
-	}
-
-	logger.info(`initializing bots`);
-	await Promise.all(bots.map((bot) => bot.init()));
-
-	logger.info(`starting bots`);
-	await Promise.all(
-		bots.map((bot) => bot.startIntervalLoop(bot.defaultIntervalMs))
-	);
-
-	eventSubscriber.eventEmitter.on('newEvent', async (event) => {
-		Promise.all(bots.map((bot) => bot.trigger(event)));
-	});
-
-	// start http server listening to /health endpoint using http package
-	http
-		.createServer(async (req, res) => {
-			if (req.url === '/health') {
-				if (opts.testLiveness) {
-					if (Date.now() > startupTime + 60 * 1000) {
-						res.writeHead(500);
-						res.end('Testing liveness test fail');
-						return;
-					}
-				}
-				// check if a slot was received recently
-				let healthySlot = false;
-				await lastSlotReceivedMutex.runExclusive(async () => {
-					healthySlot = lastSlotReceived > lastHealthCheckSlot;
-					logger.debug(
-						`Health check: lastSlotReceived: ${lastSlotReceived}, lastHealthCheckSlot: ${lastHealthCheckSlot}, healthySlot: ${healthySlot}`
-					);
-					if (healthySlot) {
-						lastHealthCheckSlot = lastSlotReceived;
-					}
-				});
-				if (!healthySlot) {
-					res.writeHead(500);
-					logger.error(`SlotSubscriber is not healthy`);
-					res.end(`SlotSubscriber is not healthy`);
-					return;
-				}
-
-				// check all bots if they're live
-				for (const bot of bots) {
-					const healthCheck = await promiseTimeout(bot.healthCheck(), 1000);
-					if (!healthCheck) {
-						logger.error(`Health check failed for bot ${bot.name}`);
-						res.writeHead(500);
-						res.end(`Bot ${bot.name} is not healthy`);
-						return;
-					}
-				}
-
-				// liveness check passed
-				res.writeHead(200);
-				res.end('OK');
-			} else {
-				res.writeHead(404);
-				res.end('Not found');
-			}
-		})
-		.listen(healthCheckPort);
-	logger.info(`Health check server listening on port ${healthCheckPort}`);
+	process.exit(0);
 };
 
-async function recursiveTryCatch(f: () => void) {
-	try {
-		await f();
-	} catch (e) {
-		console.error(e);
-		for (const bot of bots) {
-			bot.reset();
-			await bot.init();
-		}
-		await sleep(15000);
-		await recursiveTryCatch(f);
-	}
-}
-
-recursiveTryCatch(() => runBot());
+runBot();
