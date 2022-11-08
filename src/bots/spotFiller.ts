@@ -10,6 +10,7 @@ import {
 	MakerInfo,
 	isVariant,
 	DLOB,
+	isOracleValid,
 	NodeToFill,
 	UserMap,
 	UserStatsMap,
@@ -191,12 +192,6 @@ export class SpotFillerBot implements Bot {
 		const oraclePriceData = this.clearingHouse.getOracleDataForSpotMarket(
 			market.marketIndex
 		);
-
-		// Check if oracle is valid
-		if (!this.clearingHouse.oracleIsValid) {
-			// return no nodes to fill given oracle is not valid
-			return nodes;
-		}
 
 		await this.dlobMutex.runExclusive(async () => {
 			const serumSubscriber = this.serumSubscribers.get(market.marketIndex);
