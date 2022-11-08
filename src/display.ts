@@ -1,6 +1,5 @@
 import fs from 'fs';
 import { program, Option } from 'commander';
-import * as http from 'http';
 
 import { Connection, Commitment, Keypair, PublicKey } from '@solana/web3.js';
 
@@ -29,20 +28,9 @@ import {
 	getSignedTokenAmount,
 	TokenFaucet,
 } from '@drift-labs/sdk';
-import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
-import { Mutex } from 'async-mutex';
 
 import { logger, setLogLevel } from './logger';
 import { constants } from './types';
-import { FillerBot } from './bots/filler';
-import { SpotFillerBot } from './bots/spotFiller';
-import { TriggerBot } from './bots/trigger';
-import { JitMakerBot } from './bots/jitMaker';
-import { PerpLiquidatorBot } from './bots/liquidator';
-import { FloatingPerpMakerBot } from './bots/floatingMaker';
-import { Bot } from './types';
-import { Metrics } from './metrics';
-import { PnlSettlerBot } from './bots/pnlSettler';
 import {
 	getOrCreateAssociatedTokenAccount,
 	TOKEN_FAUCET_PROGRAM_ID,
@@ -54,7 +42,6 @@ const driftEnv = process.env.ENV as DriftEnv;
 const sdkConfig = initialize({ env: process.env.ENV });
 
 const stateCommitment: Commitment = 'confirmed';
-const healthCheckPort = process.env.HEALTH_CHECK_PORT || 8888;
 
 program
 	.option('-d, --dry-run', 'Dry run, do not send transactions on chain')
@@ -282,10 +269,6 @@ const runBot = async () => {
 	);
 
 	const slotSubscriber = new SlotSubscriber(connection, {});
-	const lastSlotReceivedMutex = new Mutex();
-	let lastSlotReceived: number;
-	let lastHealthCheckSlot = -1;
-	const startupTime = Date.now();
 
 	const lamportsBalance = await connection.getBalance(wallet.publicKey);
 	logger.info(
@@ -309,11 +292,6 @@ const runBot = async () => {
 
 	eventSubscriber.subscribe();
 	await slotSubscriber.subscribe();
-	slotSubscriber.eventEmitter.on('newSlot', async (slot: number) => {
-		await lastSlotReceivedMutex.runExclusive(async () => {
-			lastSlotReceived = slot;
-		});
-	});
 
 	if (!(await clearingHouse.getUser().exists())) {
 		logger.error(`User for ${wallet.publicKey} does not exist`);
