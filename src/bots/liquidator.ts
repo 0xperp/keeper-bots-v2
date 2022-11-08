@@ -1,8 +1,8 @@
 import {
 	BN,
 	convertToNumber,
-	ClearingHouse,
-	ClearingHouseUser,
+	User,
+	DriftClient,
 	isVariant,
 	OrderRecord,
 	LiquidationRecord,
@@ -32,7 +32,7 @@ export class PerpLiquidatorBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 10000;
 
-	private clearingHouse: ClearingHouse;
+	private clearingHouse: DriftClient;
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
 	private metrics: Metrics | undefined;
@@ -55,7 +55,7 @@ export class PerpLiquidatorBot implements Bot {
 	constructor(
 		name: string,
 		dryRun: boolean,
-		clearingHouse: ClearingHouse,
+		clearingHouse: DriftClient,
 		metrics?: Metrics | undefined
 	) {
 		this.name = name;
@@ -190,7 +190,7 @@ export class PerpLiquidatorBot implements Bot {
 	}
 
 	private calculateBaseAmountToLiquidate(
-		liquidatorUser: ClearingHouseUser,
+		liquidatorUser: User,
 		liquidateePosition: PerpPosition
 	): BN {
 		const oraclePrice = this.clearingHouse.getOracleDataForPerpMarket(
