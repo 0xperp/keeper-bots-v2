@@ -685,7 +685,7 @@ export class FillerBot implements Bot {
 					}
 					this.dlob = new DLOB(
 						this.clearingHouse.getPerpMarketAccounts(),
-						this.clearingHouse.getSpotMarketAccounts(), // TODO: new sdk - remove this
+						this.clearingHouse.getSpotMarketAccounts(),
 						this.clearingHouse.getStateAccount(),
 						this.userMap,
 						true
