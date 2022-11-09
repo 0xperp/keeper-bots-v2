@@ -1,14 +1,3 @@
-/**
- * Improvements
- *
- * - [x] vault
- * - [x] monitoring
- * - [x] add in full grafana dashboards and datasources from load
- * - [x] ability to re bid a specific auction
- * - [x] Improved Pricing
- * - [ ] ability to hedge on spot market and additional markets
- */
-
 import {
 	BN,
 	isVariant,
@@ -262,42 +251,6 @@ export class JitMakerBot implements Bot {
 	 */
 	public viewDlob(): DLOB {
 		return this.dlob;
-	}
-
-	/**
-	 * This function creates a distribution of the values in array based on the
-	 * weights array. The returned array should be used in randomIndex to make
-	 * a random draw from the distribution.
-	 * @param array the array to create a distribution from
-	 * @param weights the weights to use for the distribution
-	 * @param size the size of the distribution
-	 * @returns the distribution
-	 */
-	private createDistribution(
-		array: Array<any>,
-		weights: Array<number>,
-		size: number
-	): Array<number> {
-		const distribution = [];
-		const sum = weights.reduce((a: number, b: number) => a + b);
-		const quant = size / sum;
-		for (let i = 0; i < array.length; ++i) {
-			const limit = quant * weights[i];
-			for (let j = 0; j < limit; ++j) {
-				distribution.push(i);
-			}
-		}
-		return distribution;
-	}
-
-	/**
-	 * Make a random choice from distribution
-	 * @param distribution array of values that can be drawn from
-	 * @returns a random value from the distribution
-	 */
-	private randomIndex(distribution: Array<number>): number {
-		const index = Math.floor(distribution.length * Math.random()); // random index
-		return distribution[index];
 	}
 
 	/**
@@ -586,14 +539,6 @@ export class JitMakerBot implements Bot {
 			MarketType.PERP
 		);
 
-		logger.error(
-			`Market Index ${
-				market.marketIndex
-			}, Slot ${this.slotSubscriber.getSlot()}, Nodes to fill ${
-				nodesToFill.length
-			}`
-		);
-
 		// iterate over each node, determine if it can be filled, and fill it
 		for (const nodeToFill of nodesToFill) {
 			// check if the node can be filled
@@ -644,8 +589,9 @@ export class JitMakerBot implements Bot {
 			// determine the auction starting price
 			// this defaults to the oracle price
 			// https://docs.drift.trade/just-in-time-jit-auctions#INgHr
-			const jitMakerPrice = nodeToFill.node.order.auctionStartPrice;
+			const auctionStartPrice = nodeToFill.node.order.auctionStartPrice;
 			const auctionEndPrice = nodeToFill.node.order.auctionEndPrice;
+			const jitMakerPrice = auctionStartPrice;
 
 			// determine the base amount to fill and the quote amount given the starting price
 			const jitMakerBaseAssetAmount = this.determineJitAuctionBaseFillAmount(
@@ -722,10 +668,51 @@ export class JitMakerBot implements Bot {
 
 			// check if oracle price status is down
 			if (
-				PriceStatus[pythPrice.status] == 'Halted' ||
-				PriceStatus[pythPrice.status] == 'Unknown'
+				PriceStatus[pythPrice.status] != 'Trading' &&
+				PriceStatus[pythPrice.status] != 'Auction'
 			) {
+				logger.error(`Breaking ${PriceStatus[pythPrice.status]}`);
 				break;
+			}
+
+			// Determining Pricing
+			let fillPrice = auctionStartPrice;
+			const pyth = new BN(pythPrice.price);
+
+			// if pyth price is within the the auction start:end use it
+			if (pyth.gte(auctionStartPrice) && pyth.lte(auctionEndPrice)) {
+				fillPrice = pyth;
+			}
+
+			// calculate funding rate
+			const fundingRate = market.amm.lastFundingRate.mul(new BN(24));
+
+			// if funding is negative, longs receive, if position direction is long jit would be taking short meaning they would pay the funding
+			const rebate = new BN(120000000);
+			logger.info(`Funding rate ${fundingRate} and rebate ${rebate}`);
+
+			let fundingToBot = false;
+			// funding being paid to longs and position is long
+			if (
+				fundingRate.lte(new BN(0)) &&
+				jitMakerDirection == PositionDirection.LONG
+			) {
+				fundingToBot = true;
+			}
+			// funding being paid to shorts and position is short
+			else if (
+				fundingRate.gte(new BN(0)) &&
+				jitMakerDirection == PositionDirection.SHORT
+			) {
+				fundingToBot = true;
+			}
+
+			// funding rate to high for rebate and funding isn't being paid to us continue
+			if (fundingRate.abs().gte(rebate) && !fundingToBot) {
+				logger.error(
+					`Funding rate of ${fundingRate} for ${marketSymbol} is greater than the maker fee rebate and funding isn't going to the bot, not filling`
+				);
+				continue;
 			}
 
 			// try to execute the transaction to fill the order
@@ -734,7 +721,7 @@ export class JitMakerBot implements Bot {
 					jitMakerBaseAssetAmount,
 					nodeToFill,
 					jitMakerDirection,
-					new BN(pythPrice.price)
+					fillPrice
 				);
 				return txSig;
 			} catch (error) {
