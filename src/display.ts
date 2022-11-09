@@ -11,8 +11,8 @@ import {
 import {
 	getVariant,
 	BulkAccountLoader,
-	ClearingHouse,
-	ClearingHouseUser,
+	DriftClient,
+	User,
 	initialize,
 	Wallet,
 	DriftEnv,
@@ -135,7 +135,7 @@ function sleep(ms) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function printUserAccountStats(clearingHouseUser: ClearingHouseUser) {
+function printUserAccountStats(clearingHouseUser: User) {
 	const freeCollateral = clearingHouseUser.getFreeCollateral();
 	logger.info(
 		`User free collateral: $${convertToNumber(
@@ -158,7 +158,7 @@ function printUserAccountStats(clearingHouseUser: ClearingHouseUser) {
 	);
 }
 
-function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
+function printOpenPositions(clearingHouseUser: User) {
 	logger.info('Open Perp Positions:');
 	for (const p of clearingHouseUser.getUserAccount().perpPositions) {
 		if (p.baseAssetAmount.isZero()) {
@@ -228,7 +228,7 @@ function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
 const runBot = async () => {
 	const wallet = await getWallet();
 	const clearingHousePublicKey = new PublicKey(
-		sdkConfig.CLEARING_HOUSE_PROGRAM_ID
+		sdkConfig.DRIFT_PROGRAM_ID
 	);
 
 	const connection = new Connection(endpoint, stateCommitment);
@@ -238,7 +238,7 @@ const runBot = async () => {
 		stateCommitment,
 		1000
 	);
-	const clearingHouse = new ClearingHouse({
+	const clearingHouse = new DriftClient({
 		connection,
 		wallet,
 		programID: clearingHousePublicKey,
