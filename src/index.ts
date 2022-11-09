@@ -114,11 +114,11 @@ export async function getWallet(): Promise<Wallet> {
 			.then((response) => response.json())
 			.then((response) => {
 				try {
-					privateKey = response.data.data.pk
+					privateKey = response.data.data.pk;
 				} catch {
-					throw new Error(`Unable to retrive key in vault check pathing`);	
+					throw new Error(`Unable to retrive key in vault check pathing`);
 				}
-			})
+			});
 	} else {
 		privateKey = process.env.KEEPER_PRIVATE_KEY;
 	}
