@@ -36,8 +36,8 @@ services:
       - "host.docker.internal:host-gateway"
   
   jit-bot:
-    container_name: drift-jit-maker
-    image: jit:0xperp
+    container_name: drift-jit-bot
+    image: jit:base
     restart: unless-stopped
     hostname: drift-jit-bot
     networks:
@@ -47,33 +47,61 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
-  # nodeexporter:
-  #    image: prom/node-exporter:latest
-  #    volumes:
-  #      - /proc:/host/proc:ro
-  #      - /sys:/host/sys:ro
-  #      - /:/rootfs:ro
-  #    command:
-  #      - '--path.procfs=/host/proc'
-  #      - '--path.rootfs=/rootfs'
-  #      - '--path.sysfs=/host/sys'
-  #      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
-  #    restart: unless-stopped
-  #    expose:
-  #      - 9100
-  #    network_mode: host
+  loki:
+    container_name: loki
+    image: grafana/loki:latest
+    hostname: loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - drift-network
 
-  # cadvisor:
-  #   image: gcr.io/google-containers/cadvisor:latest
-  #   volumes:
-  #     - /:/rootfs:ro
-  #     - /var/run:/var/run:rw
-  #     - /sys:/sys:ro
-  #     - /var/lib/docker:/var/lib/docker:ro
-  #   restart: unless-stopped
-  #   expose:
-  #     - 8080
-  #   network_mode: host
+  promtail:
+    container_name: promtail
+    image: grafana/promtail:latest
+    hostname: promtail
+    volumes:
+      - /var/log:/var/log
+      - /var/lib/docker/containers:/var/lib/docker/containers
+      - ./monitoring/prometheus/promtail.yml:/etc/promtail/promtail.yml
+    command: -config.file=/etc/promtail/promtail.yml
+    networks:
+      - drift-network
+
+  nodeexporter:
+     container_name: node_exporter
+     image: prom/node-exporter:latest
+     hostname: node_exporter
+     volumes:
+       - /proc:/host/proc:ro
+       - /sys:/host/sys:ro
+       - /:/rootfs:ro
+     command:
+       - '--path.procfs=/host/proc'
+       - '--path.rootfs=/rootfs'
+       - '--path.sysfs=/host/sys'
+       - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+     restart: unless-stopped
+     expose:
+       - 9100
+     networks:
+      - drift-network
+
+  cadvisor:
+    container_name: cadvisor
+    image: gcr.io/cadvisor/cadvisor
+    hostname: cadvisor
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+    restart: unless-stopped
+    expose:
+      - 8080
+    networks:
+      - drift-network
 
 networks:
   drift-network:
