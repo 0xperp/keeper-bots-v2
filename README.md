@@ -10,6 +10,22 @@
   </p>
 </div>
 
+This fork has a few improvements over the original drift [keeper-bots-v2](https://github.com/drift-labs/keeper-bots-v2) relating to pricing, monitoring, and other operations. The improvements are detailed below. 
+
+### Pricing and Hedging
+- Rather than filling every jit auction with the auction start price use the mid price direct from the oracle. Often this is a significant difference even though the auction start price is also the oracle price. 
+- Checking if the oracle is active and not erroring (would lead to auctions being filled at bad prices)
+- If funding rate for a position is greater than the # orders filled * the maker rebate (1.2bps) set to close
+- There is a chance that an order from the dlob is heard out of order and unable to be processed initially, added in checks to see if the failed submission of an order is still in the dlob and will submit to fill again 
+- While running this bot you do not want to take on to much delta exposure. When `MAX_POSITION_EXPOSURE` (default 10% collateral) is reached all positions will be set to reduce only mode. Capping the bots delta exposure is important but also limits the bot to filling jit auctions with only ~10% of it's collateral before it only participates in orders that reduce its exposure. Now when `MAX_POSITION_EXPOSURE` is reached, the delta will be hedged on [01](https://01.exchange) allowing the bot to continue filling **all** orders.
+
+### Monitoring and Logging
+- Dashboards for monitoring orders and pnl, along with logs, and hardware statistics
+- Logging with Loki
+
+### Custody
+- Implementation of Vault as a key-value store with the experimental additions of a plugin 
+
 # Setting up
 ## Setup Environment
 ```shell

@@ -192,7 +192,11 @@ export class SpotFillerBot implements Bot {
 			market.marketIndex
 		);
 
-		// TODO: check oracle validity when ready
+		// Check if oracle is valid
+		if (!this.clearingHouse.oracleIsValid) {
+			// return no nodes to fill given oracle is not valid
+			return nodes;
+		}
 
 		await this.dlobMutex.runExclusive(async () => {
 			const serumSubscriber = this.serumSubscribers.get(market.marketIndex);
@@ -335,7 +339,7 @@ export class SpotFillerBot implements Bot {
 						delete this.dlob;
 					}
 					this.dlob = new DLOB(
-						this.clearingHouse.getPerpMarketAccounts(), // TODO: new sdk - remove this
+						this.clearingHouse.getPerpMarketAccounts(),
 						this.clearingHouse.getSpotMarketAccounts(),
 						this.clearingHouse.getStateAccount(),
 						this.userMap,
