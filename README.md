@@ -13,18 +13,32 @@
 This fork has a few improvements over the original drift [keeper-bots-v2](https://github.com/drift-labs/keeper-bots-v2) relating to pricing, monitoring, and other operations. The improvements are detailed below. 
 
 ### Pricing and Hedging
-- Rather than filling every jit auction with the auction start price use the mid price direct from the oracle. Often this is a significant difference even though the auction start price is also the oracle price. 
-- Checking if the oracle is active and not erroring (would lead to auctions being filled at bad prices)
-- If funding rate for a position is greater than the # orders filled * the maker rebate (1.2bps) set to close
-- There is a chance that an order from the dlob is heard out of order and unable to be processed initially, added in checks to see if the failed submission of an order is still in the dlob and will submit to fill again 
-- While running this bot you do not want to take on to much delta exposure. When `MAX_POSITION_EXPOSURE` (default 10% collateral) is reached all positions will be set to reduce only mode. Capping the bots delta exposure is important but also limits the bot to filling jit auctions with only ~10% of it's collateral before it only participates in orders that reduce its exposure. Now when `MAX_POSITION_EXPOSURE` is reached, the delta will be hedged on [01](https://01.exchange) allowing the bot to continue filling **all** orders.
+Determining the proper price to pay for filling an order along with the amount of risk you are comfortable taking is a the key factor in the profitability of the bot. A few improvements that were made to this are:
+
+- Rather than filling every jit auction with the auction start price use the mid price direct from the oracle. For market orders the auction start price is the current oracle price, limit orders start at the limit and the auction end prices are the pricing from the AMM. After knowing the auction start price grab the current oracle providers actual price (and check if the oracle is functioning). If the oracle price is within the auction price bands fill at that, otherwise fill at the limit order. This should give more competitive pricing to the true price of the asset for market orders. 
+- Market maker rebate can be assumed to be 1.2bps if the current funding rate needed to be paid by the position the jitter is entering exceeds this do not enter the position. If the jitter is earning the funding or it is below the rebate take the order!
+- There is a chance that an order from the dlob is heard out of order and unable to be processed initially, added in checks to see if the failed submission of an order is still in the dlob and will submit to fill again. 
+- One improvement that I really wanted to get to was expanding the amount of risk that a given bot could take on. Right now it is capped by the max position exposure variable which is set to 10% of your overall collateral. That is if a position exceeds 10% of all collateral you have on the platform enter init reduce only mode. This limits a good portion of trades that can be filled by the bot and thus profit. In order to reduce this exposure but continuing to fill as many orders as possible the exposure can be hedged on another exchange perps or spot/lending. However when assessing the current landscape for exchanges to do this on none really made sense, given [01](https://01.xyz) little liquidity across pairs, [mango](https://mango.markets) not being active following manipulation and not many other perp dexs. As more exchanges come online this feature will be useful.
 
 ### Monitoring and Logging
-- Dashboards for monitoring orders and pnl, along with logs, and hardware statistics
-- Logging with Loki
+Understanding in depth metrics on pnl, orders, and exposure along with how the bot is operating is a key part in operating and improving the bot. 
+
+- Run all via docker compose for ease of use and control
+- Dashboards for monitoring orders and pnl, along with logs, and hardware statistics for keeping up to date on the bots total exposure, orders, errors, etc
+- Logging with Loki to keep track of all logs from each service/container that is running. This will help to diagnose bugs later
 
 ### Custody
-- Implementation of Vault as a key-value store with the experimental additions of a plugin 
+A often over looked but extremely important feature (especially with many hot wallet [comprismises](https://thedefiant.io/deribit-exploit)) strong custody practices around very active keys is important. Many bots operate simply with a `.env` file storing the private key which is easy access given a machine compromise 
+
+Implementing [Hashicorp Vault](https://hashicorp.com/vault) for custody allows for 
+- Audibility of key access ß
+- Access control 
+- Alerts on access
+- Control, backup, and redundancy of key storage (prime example is the various tornado cash relay servers seized from hetzner)
+
+You can read more about vault and its implementation [here](https://github.com/0xperp/keeper-bots-v2/tree/master/secrets-engine)
+
+On the software / permission side of custody many operators create programs that interact with a platform (like this bot!) but the preferred solution would be to have a custom smart contract allowed to do only certain functions and with a multisig of withdrawers. But that is for future improvements.
 
 # Setting up
 ## Setup Environment
