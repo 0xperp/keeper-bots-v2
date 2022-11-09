@@ -10,7 +10,6 @@ import {
 	MakerInfo,
 	isVariant,
 	DLOB,
-	isOracleValid,
 	NodeToFill,
 	UserMap,
 	UserStatsMap,

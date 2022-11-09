@@ -1,14 +1,3 @@
-/**
- * Improvements
- *
- * - [x] vault
- * - [x] monitoring
- * - [x] add in full grafana dashboards and datasources from load
- * - [x] ability to re bid a specific auction
- * - [x] Improved Pricing
- * - [ ] ability to hedge on spot market and additional markets
- */
-
 import {
 	BN,
 	isVariant,
@@ -23,7 +12,6 @@ import {
 	QUOTE_PRECISION,
 	convertToNumber,
 	PRICE_PRECISION,
-	FUNDING_RATE_PRECISION,
 	PerpPosition,
 	SpotPosition,
 	DLOB,
