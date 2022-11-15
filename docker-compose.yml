@@ -37,7 +37,7 @@ services:
   
   jit-bot:
     container_name: drift-jit-bot
-    image: jit:base
+    image: jit:0xperp
     restart: unless-stopped
     hostname: drift-jit-bot
     networks:

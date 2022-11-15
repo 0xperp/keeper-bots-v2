@@ -106,13 +106,13 @@ export class JitMakerBot implements Bot {
 	/**
 	 * Set true to enforce max position size
 	 */
-	private RESTRICT_POSITION_SIZE = false;
+	private RESTRICT_POSITION_SIZE = true;
 
 	/**
 	 * if a position's notional value passes this percentage of account
 	 * collateral, the position enters a CLOSING_* state.
 	 */
-	private MAX_POSITION_EXPOSURE = 0.1;
+	private MAX_POSITION_EXPOSURE = 0.2;
 
 	/**
 	 * The max amount of quote to spend on each order.
@@ -466,7 +466,7 @@ export class JitMakerBot implements Bot {
 			).toString()} of remaining order ${convertToNumber(
 				orderBaseAmountAvailable,
 				BASE_PRECISION
-			)} at a price of .`
+			)}`
 		);
 
 		return baseFillAmountBN;
@@ -517,9 +517,10 @@ export class JitMakerBot implements Bot {
 		);
 
 		logger.info(
-			`${
-				this.name
-			}: JIT auction filled (account: ${nodeToFill.node.userAccount.toString()} - ${nodeToFill.node.order.orderId.toString()}), Tx: ${txSig}`
+			`${this.name}: JIT auction filled \n Amount: ${convertToNumber(
+				baseAssetAmount,
+				BASE_PRECISION
+			).toString()} \n Price ${makerPrice} \n (account: ${nodeToFill.node.userAccount.toString()} - ${nodeToFill.node.order.orderId.toString()}), Tx: ${txSig}`
 		);
 
 		return txSig;
@@ -677,31 +678,48 @@ export class JitMakerBot implements Bot {
 
 			// Determining Pricing
 			let fillPrice = auctionStartPrice;
-			const pyth = new BN(pythPrice.price);
+			const pyth = new BN(pythPrice.price * 1e6); // maybe work in confidence interval here?
 
 			// if pyth price is within the the auction start:end use it
-			if (pyth.gte(auctionStartPrice) && pyth.lte(auctionEndPrice)) {
+			logger.error(`
+				Start: ${auctionStartPrice}\n
+				Pyth:  ${pyth}\n
+				End:  ${auctionEndPrice}
+			`);
+			if (
+				jitMakerDirection == PositionDirection.LONG &&
+				pyth.lte(auctionStartPrice) &&
+				pyth.gte(auctionEndPrice)
+			) {
+				logger.error('Using Pyth');
+				fillPrice = pyth;
+			} else if (
+				jitMakerDirection == PositionDirection.SHORT &&
+				pyth.gte(auctionStartPrice) &&
+				pyth.lte(auctionEndPrice)
+			) {
+				logger.error('Using Pyth');
 				fillPrice = pyth;
 			}
 
 			// calculate funding rate
-			const fundingRate = market.amm.lastFundingRate.mul(new BN(24));
+			const fundingRate = market.amm.lastFundingRate.div(new BN(24));
 
 			// if funding is negative, longs receive, if position direction is long jit would be taking short meaning they would pay the funding
 			const rebate = new BN(120000000);
 			logger.info(`Funding rate ${fundingRate} and rebate ${rebate}`);
 
 			let fundingToBot = false;
-			// funding being paid to longs and position is long
+			// if funding is positive it is paid from longs > shorts
 			if (
-				fundingRate.lte(new BN(0)) &&
+				fundingRate.gte(new BN(0)) &&
 				jitMakerDirection == PositionDirection.LONG
 			) {
 				fundingToBot = true;
 			}
-			// funding being paid to shorts and position is short
+			// if funding is negative it is paid from shorts > longs
 			else if (
-				fundingRate.gte(new BN(0)) &&
+				fundingRate.lte(new BN(0)) &&
 				jitMakerDirection == PositionDirection.SHORT
 			) {
 				fundingToBot = true;
@@ -768,7 +786,7 @@ export class JitMakerBot implements Bot {
 					);
 				} else {
 					logger.error(
-						`Error (${errorCode}) filling JIT auction (account: ${nodeToFill.node.userAccount.toString()} - ${nodeToFill.node.order.orderId.toString()})`
+						`Error (${errorCode}):${error} filling JIT auction (account: ${nodeToFill.node.userAccount.toString()} - ${nodeToFill.node.order.orderId.toString()})`
 					);
 				}
 			}

@@ -227,9 +227,7 @@ function printOpenPositions(clearingHouseUser: User) {
 
 const runBot = async () => {
 	const wallet = await getWallet();
-	const clearingHousePublicKey = new PublicKey(
-		sdkConfig.DRIFT_PROGRAM_ID
-	);
+	const clearingHousePublicKey = new PublicKey(sdkConfig.DRIFT_PROGRAM_ID);
 
 	const connection = new Connection(endpoint, stateCommitment);
 

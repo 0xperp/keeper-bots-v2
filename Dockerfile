@@ -1,4 +1,4 @@
-FROM public.ecr.aws/bitnami/node:14
+FROM public.ecr.aws/bitnami/node:18
 RUN apt-get install git
 ENV NODE_ENV=production
 
@@ -14,4 +14,4 @@ RUN yarn build
 EXPOSE 9464
 
 # CMD [ "yarn", "start:all" ]
-CMD [ "yarn", "dev:jitmaker" ]
+CMD [ "yarn", "dev:jitmaker"]
